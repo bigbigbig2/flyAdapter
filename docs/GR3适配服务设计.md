@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-这个工程的目标不是重新定义一套背包协议，而是让 GR3 对外表现得像原来的 Unitree 适配服务。背包继续调用 `/slam/...` 和 `/audio/...`，GR3 适配层内部把这些调用翻译到 HumanoidNav / ROS2 和 Aurora SDK。
+这个工程的目标不是重新定义一套背包协议，而是让 GR3 对外表现得像原来的 Unitree 适配服务。背包继续调用 `/slam/...` 和 `/audio/...`，GR3 适配层内部把这些调用翻译到 HumanoidNav / ROS2；底层机体控制通过独立 Aurora Agent 调用 Aurora SDK。
 
 固定命名空间：
 
@@ -37,14 +37,28 @@ GR3 Adapter
       |   +-- /GR301AA0025/Humanoid_nav/health
       |
       +-- AuroraBridge
-      |   +-- FSM 状态
-      |   +-- ensure_stand
-      |   +-- stop_motion
+      |   +-- 读本地 Aurora Agent 状态缓存
+      |   +-- ensure_stand -> Aurora Agent
+      |   +-- stop_motion -> Aurora Agent
       |
       +-- JsonStore
           +-- navigation_points.json
           +-- runtime.json
           +-- routes.json
+
+Aurora Agent 单独运行：
+
+```plain
+GR3 Adapter
+  |
+  | HTTP localhost, short timeout
+  v
+Aurora Agent
+  |
+  | in-process AuroraClient
+  v
+Aurora SDK / AuroraCore / DDS
+```
 ```
 
 ## 3. 为什么外层要兼容 Unitree
@@ -82,7 +96,7 @@ GR3 Adapter
 | 停止导航 | 调 `/GR301AA0025/cancel_current_action`，并调用 Aurora stop_motion 兜底 |
 | 巡航 | 适配层顺序发送多个 `navigate_to_pose` goal |
 | 事件流 | 适配层 SSE 广播 Unitree 风格事件 |
-| 站立检查 | Aurora SDK / FSM |
+| 站立检查 | Aurora Agent 状态缓存 / FSM |
 
 ## 5. 导航前预检
 
@@ -97,9 +111,11 @@ GR3 是人形机器人，适配层必须在导航前做安全检查：
 7. Aurora 是否连接。
 8. 机器人是否站立。
 
-Aurora SDK 按 `D:\shu\2` 已验证工程的方式接入：adapter 进程本身运行在能直接 import `fourier_aurora_client` 的 Python 环境里。也就是说，如果现场需要在 Docker 里调用 Aurora SDK，就让 adapter 服务也在同一个 Docker/SDK 环境中启动，而不是宿主机 HTTP 请求反复 `docker exec` 到容器里。
+Aurora SDK 不作为主 Adapter 的本进程依赖。主 Adapter 运行在 HumanoidNav/ROS2 环境里，状态接口只读内存缓存；Aurora SDK 由独立 Aurora Agent 持有，Agent 必须运行在能正确 import `fourier_aurora_client` 及其 DDS 消息依赖的环境里。
 
 ```bash
+export AURORA_BACKEND=agent
+export AURORA_AGENT_URL=http://127.0.0.1:18080
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
@@ -107,13 +123,19 @@ export AURORA_CLIENT_CLASS=AuroraClient
 export AURORA_STAND_FSM_STATE=2
 ```
 
-适配层内部只做薄封装：
+主 Adapter 内部只做 Agent facade：
 
-- `AuroraClient.get_instance(domain_id=123, robot_name="gr3v233")` 懒加载一次。
-- 后续 HTTP 请求复用同一个 client。
+- `/robot/status` 和 `/robot/readiness` 仅读 Aurora 状态缓存，O(1) 返回。
+- 后台线程按 `AURORA_POLL_INTERVAL_SEC` 轮询 Aurora Agent `/state`。
+- `ensure_stand`、`set_fsm`、`stop_motion` 才会短超时调用 Agent。
+- 命令调用有串行锁和熔断保护，避免 Agent 异常拖垮主服务。
+
+Aurora Agent 内部才做 SDK 调用：
+
+- `AuroraClient.get_instance(domain_id=123, robot_name="gr3v233")` 懒加载一次并复用。
+- 后台轮询 `get_fsm_state` / `get_state` / `get_robot_state`。
 - 站立调用 `set_fsm_state(AURORA_STAND_FSM_STATE)`。
 - 停止运动调用 `set_velocity_source(2)` 后发送 `set_velocity(0, 0, 0, duration)`。
-- `/robot/status` 和 `/robot/readiness` 不再跨进程拉起 Aurora SDK。
 
 默认 `REQUIRE_AURORA=0`，便于 Aurora 容器权限或 SDK 模块名还没确认时先调 HTTP 和 ROS；真机安全部署时建议在 Aurora 后端连通后改成：
 
@@ -185,7 +207,20 @@ source /opt/fftai/humanoidnav/install/setup.bash
   --namespace GR301AA0025
 ```
 
-3. 启动适配服务：
+3. 启动 Aurora Agent。这个进程放在 Aurora SDK 正确环境或容器里运行，不要求 source HumanoidNav：
+
+```bash
+cd ~/aurora_ws/gr3
+export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
+export AURORA_CLIENT_MODULE=fourier_aurora_client
+export AURORA_CLIENT_CLASS=AuroraClient
+export AURORA_STAND_FSM_STATE=2
+
+./scripts/run_aurora_agent.sh
+```
+
+4. 启动适配服务：
 
 ```bash
 cd ~/aurora_ws/gr3
@@ -195,10 +230,12 @@ source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 export ROBOT_NAMESPACE=GR301AA0025
+export AURORA_BACKEND=agent
+export AURORA_AGENT_URL=http://127.0.0.1:18080
 ./scripts/run_adapter.sh
 ```
 
-4. 加载地图：
+5. 加载地图：
 
 ```bash
 cd /opt/fftai/humanoidnav

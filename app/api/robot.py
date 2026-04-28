@@ -267,21 +267,21 @@ def mission_status(request: Request) -> dict:
     return service(request).nav_status()
 
 
-@router.get("/aurora/ping", summary="检查 Aurora SDK 连通性")
+@router.get("/aurora/ping", summary="检查 Aurora Agent 连通性")
 def aurora_ping(request: Request) -> dict:
-    """检查 Aurora bridge 是否可用，区别于 HumanoidNav/ROS2 状态。"""
+    """检查 Aurora Agent 是否可用，区别于 HumanoidNav/ROS2 状态。"""
     return service(request).aurora.ping()
 
 
 @router.get("/aurora/state", summary="查询 Aurora 状态")
 def aurora_state(request: Request, force_refresh: bool = Query(default=False)) -> dict:
-    """返回 Aurora FSM、是否站立、是否 mock、错误信息等。"""
+    """返回缓存的 Aurora FSM、是否站立、是否 mock、Agent 错误信息等。"""
     return service(request).aurora.state(force_refresh=force_refresh)
 
 
 @router.post("/aurora/fsm", summary="设置 Aurora FSM")
 def aurora_fsm(request: Request, body: FsmRequest) -> dict:
-    """直接设置 Aurora FSM，用于底层动作调试，谨慎使用。"""
+    """通过 Aurora Agent 设置 FSM，用于底层动作调试，谨慎使用。"""
     return service(request).aurora.set_fsm(body.fsm_state)
 
 
@@ -293,5 +293,5 @@ def aurora_ensure_stand(request: Request) -> dict:
 
 @router.post("/aurora/stop_motion", summary="停止机体运动")
 def aurora_stop_motion(request: Request) -> dict:
-    """调用 Aurora 停止运动能力，常作为导航取消后的安全兜底。"""
+    """通过 Aurora Agent 调用停止运动能力，常作为导航取消后的安全兜底。"""
     return service(request).aurora.stop_motion()

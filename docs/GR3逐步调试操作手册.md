@@ -369,6 +369,15 @@ curl http://127.0.0.1:8080/robot/readiness
 
 ## 8. 测试 Aurora
 
+先测 Aurora Agent：
+
+```bash
+curl http://127.0.0.1:18080/health
+curl http://127.0.0.1:18080/state
+```
+
+再测 Adapter 暴露的 Aurora facade：
+
 ```bash
 curl http://127.0.0.1:8080/robot/aurora/ping
 curl http://127.0.0.1:8080/robot/aurora/state
@@ -381,15 +390,33 @@ curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 {
   "connected": false,
   "mock": false,
+  "backend": "agent",
   "fsm_state": null,
   "standing": false,
-  "error": "cannot import AuroraClient: No module named 'fftai_aurora_sdk'"
+  "error": "Aurora agent unavailable: [Errno 111] Connection refused"
 }
 ```
 
-结论是：当前 adapter 进程所在 Python 环境没有直接 import 到 AuroraClient。现在本工程按 `D:\shu\2` 已验证工程对齐：不再通过 HTTP 请求反复 `docker exec`，也不再维护 docker sidecar；adapter 进程本身必须运行在能直接 import `fourier_aurora_client` 的环境里。
+结论是：主 Adapter 活着，但 Aurora Agent 没启动或 URL 不对。检查：
 
-如果现场 Aurora SDK 只能在 `fourier_aurora_server` 容器里使用，就把 adapter 服务也放到这个容器/同等 SDK 环境里启动，或者使用容器内 Python 环境创建 `.venv`。启动参数保留为：
+```bash
+export AURORA_AGENT_URL=http://127.0.0.1:18080
+curl http://127.0.0.1:18080/health
+```
+
+如果 Agent `/health` 返回类似：
+
+```json
+{
+  "available": false,
+  "connected": false,
+  "error": "cannot import AuroraClient from candidates: fourier_aurora_client.AuroraClient: No module named 'fourier_msgs.msg.AuroraCmd'"
+}
+```
+
+结论是：Agent 所在环境仍不是正确的 Aurora SDK 环境。此时不要改主 Adapter，要把 Agent 放到能正确 import Aurora SDK 和 `AuroraCmd` 消息的环境里。
+
+Aurora Agent 启动参数：
 
 ```bash
 export AURORA_DOMAIN_ID=123
@@ -399,34 +426,17 @@ export AURORA_CLIENT_CLASS=AuroraClient
 export AURORA_STAND_FSM_STATE=2
 ```
 
-先确认当前 adapter 即将使用的 Python 环境能找到 SDK：
-
-```bash
-cd ~/aurora_ws/gr3
-source .venv/bin/activate
-python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
-```
-
-如果容器系统 Python 能 import，但 `.venv` 不能 import，重建虚拟环境时带上系统包：
-
-```bash
-cd ~/aurora_ws/gr3
-deactivate 2>/dev/null || true
-rm -rf .venv
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
-```
-
-如果必须进容器确认，就进入容器后执行同一个 import 检查：
+如果现场 Aurora SDK 只能在 `fourier_aurora_server` 容器里使用，就在容器里启动 Agent，而不是把主 Adapter 放进去：
 
 ```bash
 sudo docker exec -it fourier_aurora_server bash
-python3 -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
+cd /workspace/gr3   # 或现场实际挂载的 gr3 目录
+export PYTHONPATH=$PWD:$PYTHONPATH
+python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
+./scripts/run_aurora_agent.sh
 ```
 
-重启 adapter 后测试：
+Agent 启动后重测 Adapter：
 
 ```bash
 curl http://127.0.0.1:8080/robot/aurora/state
@@ -436,8 +446,9 @@ curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 预期返回里会带：
 
 ```plain
-backend=python-sdk
+backend=agent
 connected=true
+fsm_state=1/2/...
 ```
 
 ### 8.1 临时先调 HTTP / ROS
@@ -448,7 +459,7 @@ connected=true
 export REQUIRE_AURORA=0
 ```
 
-这种情况下 `/robot/readiness` 会把 `aurora_unavailable` 放在 warnings，不会因为 Aurora SDK 缺失直接阻塞导航。
+这种情况下 `/robot/readiness` 会把 `aurora_unavailable` 放在 warnings，不会因为 Aurora Agent 缺失直接阻塞导航。
 
 如果只是想测试 Web 页面的 Aurora 按钮响应，可以临时 mock：
 
@@ -461,11 +472,13 @@ export AURORA_MOCK=1
 
 ### 8.2 SDK 路径或模块名不同
 
+这些变量只给 Aurora Agent 使用：
+
 ```bash
 export AURORA_SDK_PATH=/path/to/aurora/python
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
-./scripts/run_adapter.sh
+./scripts/run_aurora_agent.sh
 ```
 
 也可以按实际模块名改成：
@@ -475,9 +488,10 @@ export AURORA_CLIENT_MODULE=aurora_sdk
 export AURORA_CLIENT_CLASS=AuroraClient
 ```
 
-重启 adapter 后再看：
+重启 Agent 后再看：
 
 ```bash
+curl http://127.0.0.1:18080/state
 curl http://127.0.0.1:8080/robot/aurora/state
 ```
 

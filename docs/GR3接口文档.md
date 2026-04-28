@@ -215,7 +215,7 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 ### GET `/robot/status`
 
-聚合状态，包括 ROS、Aurora、runtime、readiness。
+聚合状态，包括 ROS、Aurora Agent 缓存、runtime、readiness。
 
 ### GET `/robot/readiness`
 
@@ -223,11 +223,11 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 ### POST `/robot/aurora/ensure_stand`
 
-让机器人进入站立态。
+通过 Aurora Agent 让机器人进入站立态。
 
 ### POST `/robot/aurora/stop_motion`
 
-停止机体运动。
+通过 Aurora Agent 停止机体运动。
 
 ### POST `/robot/map/load`
 

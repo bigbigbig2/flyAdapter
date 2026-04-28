@@ -42,12 +42,20 @@ class AppConfig:
     require_aurora: bool
     aurora_enabled: bool
     aurora_mock: bool
+    aurora_backend: str
+    aurora_agent_url: str
     aurora_robot_name: str
     aurora_domain_id: int
     aurora_stand_fsm_state: int
     aurora_sdk_path: str
     aurora_client_module: str
     aurora_client_class: str
+    aurora_poll_interval_sec: float
+    aurora_state_timeout_sec: float
+    aurora_command_timeout_sec: float
+    aurora_state_stale_sec: float
+    aurora_circuit_failure_threshold: int
+    aurora_circuit_open_sec: float
     nav_goal_timeout_sec: float
 
     @property
@@ -82,11 +90,19 @@ def load_config() -> AppConfig:
         require_aurora=_bool_env("REQUIRE_AURORA", False),
         aurora_enabled=_bool_env("AURORA_ENABLED", True),
         aurora_mock=_bool_env("AURORA_MOCK", False),
+        aurora_backend=os.getenv("AURORA_BACKEND", "agent").strip().lower(),
+        aurora_agent_url=os.getenv("AURORA_AGENT_URL", "http://127.0.0.1:18080").rstrip("/"),
         aurora_robot_name=os.getenv("AURORA_ROBOT_NAME", "gr3v233"),
         aurora_domain_id=int(os.getenv("AURORA_DOMAIN_ID", "123")),
         aurora_stand_fsm_state=int(os.getenv("AURORA_STAND_FSM_STATE", "2")),
         aurora_sdk_path=os.getenv("AURORA_SDK_PATH", ""),
         aurora_client_module=os.getenv("AURORA_CLIENT_MODULE", "fourier_aurora_client"),
         aurora_client_class=os.getenv("AURORA_CLIENT_CLASS", "AuroraClient"),
+        aurora_poll_interval_sec=float(os.getenv("AURORA_POLL_INTERVAL_SEC", "1.0")),
+        aurora_state_timeout_sec=float(os.getenv("AURORA_STATE_TIMEOUT_SEC", "0.5")),
+        aurora_command_timeout_sec=float(os.getenv("AURORA_COMMAND_TIMEOUT_SEC", "1.5")),
+        aurora_state_stale_sec=float(os.getenv("AURORA_STATE_STALE_SEC", "3.0")),
+        aurora_circuit_failure_threshold=int(os.getenv("AURORA_CIRCUIT_FAILURE_THRESHOLD", "3")),
+        aurora_circuit_open_sec=float(os.getenv("AURORA_CIRCUIT_OPEN_SEC", "5.0")),
         nav_goal_timeout_sec=float(os.getenv("NAV_GOAL_TIMEOUT_SEC", "300")),
     )
