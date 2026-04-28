@@ -97,19 +97,23 @@ GR3 是人形机器人，适配层必须在导航前做安全检查：
 7. Aurora 是否连接。
 8. 机器人是否站立。
 
-Aurora SDK 按现场文档默认走容器后端：
+Aurora SDK 按 `D:\shu\2` 已验证工程的方式接入：adapter 进程本身运行在能直接 import `fourier_aurora_client` 的 Python 环境里。也就是说，如果现场需要在 Docker 里调用 Aurora SDK，就让 adapter 服务也在同一个 Docker/SDK 环境中启动，而不是宿主机 HTTP 请求反复 `docker exec` 到容器里。
 
 ```bash
-export AURORA_BACKEND=docker
-export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
-export AURORA_DOCKER_TIMEOUT_SEC=20
-export AURORA_STATE_CACHE_TTL_SEC=10
-export AURORA_STATE_STALE_TTL_SEC=120
+export AURORA_CLIENT_CLASS=AuroraClient
+export AURORA_STAND_FSM_STATE=2
 ```
 
-容器后端不要在每次状态页刷新时都重新拉起 Aurora DDS 客户端。适配层对 Aurora 状态做短时间缓存：10 秒内直接复用最近结果；容器偶发超时时，120 秒内返回上一次成功状态并标记 `stale=true`、`warning=...`。如果后续现场仍然频繁超时，建议把 Aurora 访问进一步拆成常驻 sidecar 服务。
+适配层内部只做薄封装：
+
+- `AuroraClient.get_instance(domain_id=123, robot_name="gr3v233")` 懒加载一次。
+- 后续 HTTP 请求复用同一个 client。
+- 站立调用 `set_fsm_state(AURORA_STAND_FSM_STATE)`。
+- 停止运动调用 `set_velocity_source(2)` 后发送 `set_velocity(0, 0, 0, duration)`。
+- `/robot/status` 和 `/robot/readiness` 不再跨进程拉起 Aurora SDK。
 
 默认 `REQUIRE_AURORA=0`，便于 Aurora 容器权限或 SDK 模块名还没确认时先调 HTTP 和 ROS；真机安全部署时建议在 Aurora 后端连通后改成：
 

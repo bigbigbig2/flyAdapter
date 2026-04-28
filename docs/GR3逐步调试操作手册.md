@@ -167,7 +167,7 @@ ros2 topic list | egrep "$NS/(robot_pose|odom|odom_status_code|odom_status_score
 ```bash
 cd ~/aurora_ws/gr3
 
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -352,9 +352,9 @@ ros.ready=true
 curl http://127.0.0.1:8080/robot/readiness
 ```
 
-常见 blocker：
+常见 blocker / warning：
 
-| blocker | 含义 | 处理 |
+| 项目 | 含义 | 处理 |
 | --- | --- | --- |
 | `ros_python_unavailable` | adapter 没拿到 ROS2 Python 环境 | 重新 source ROS2 和 HumanoidNav 后启动 adapter |
 | `ros_bridge_not_ready` | ROS bridge 线程未 ready | 看 adapter 日志，确认 fourier/nav2 消息包可 import |
@@ -387,73 +387,58 @@ curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 }
 ```
 
-结论是：当前 adapter 没有从可用环境里调用到 AuroraClient。按你文档里的现场条件，Aurora SDK 通常需要在 `fourier_aurora_server` 容器里执行，所以本工程默认使用：
+结论是：当前 adapter 进程所在 Python 环境没有直接 import 到 AuroraClient。现在本工程按 `D:\shu\2` 已验证工程对齐：不再通过 HTTP 请求反复 `docker exec`，也不再维护 docker sidecar；adapter 进程本身必须运行在能直接 import `fourier_aurora_client` 的环境里。
+
+如果现场 Aurora SDK 只能在 `fourier_aurora_server` 容器里使用，就把 adapter 服务也放到这个容器/同等 SDK 环境里启动，或者使用容器内 Python 环境创建 `.venv`。启动参数保留为：
 
 ```bash
-export AURORA_BACKEND=docker
-export AURORA_CONTAINER_NAME=fourier_aurora_server
-export AURORA_CONTAINER_WORKDIR=/workspace
-export AURORA_CONTAINER_PYTHON=python3
 export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
-export AURORA_DOCKER_TIMEOUT_SEC=20
-export AURORA_STATE_CACHE_TTL_SEC=10
-export AURORA_STATE_STALE_TTL_SEC=120
+export AURORA_STAND_FSM_STATE=2
 ```
 
-先确认容器里是否能找到 SDK：
-
-```bash
-sudo docker exec -it fourier_aurora_server bash
-python3 -c "import importlib.util; print('fourier_aurora_client', importlib.util.find_spec('fourier_aurora_client')); print('aurora_sdk', importlib.util.find_spec('aurora_sdk')); print('aurora', importlib.util.find_spec('aurora')); print('fftai_aurora_sdk', importlib.util.find_spec('fftai_aurora_sdk'))"
-```
-
-如果这里能找到 SDK，adapter 重启后应该通过 docker 后端调用它：
+先确认当前 adapter 即将使用的 Python 环境能找到 SDK：
 
 ```bash
 cd ~/aurora_ws/gr3
 source .venv/bin/activate
-export AURORA_BACKEND=docker
-export AURORA_CONTAINER_NAME=fourier_aurora_server
-export AURORA_ROBOT_NAME=gr3v233
-export AURORA_DOMAIN_ID=123
-export AURORA_CLIENT_MODULE=fourier_aurora_client
-./scripts/run_adapter.sh
+python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
 ```
 
-然后测试：
+如果容器系统 Python 能 import，但 `.venv` 不能 import，重建虚拟环境时带上系统包：
+
+```bash
+cd ~/aurora_ws/gr3
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
+```
+
+如果必须进容器确认，就进入容器后执行同一个 import 检查：
+
+```bash
+sudo docker exec -it fourier_aurora_server bash
+python3 -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
+```
+
+重启 adapter 后测试：
 
 ```bash
 curl http://127.0.0.1:8080/robot/aurora/state
 curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 ```
 
-返回里会带 `backend=docker`、`container=fourier_aurora_server` 和 `raw.import_attempts`，用来判断容器内到底 import 到哪个模块。
+预期返回里会带：
 
-Adapter 会缓存 Aurora 状态，避免 Web 页面、`/robot/status`、`/robot/readiness` 连续刷新时反复 `docker exec` 拉起 DDS 客户端。字段含义：
-
-| 字段 | 含义 |
-| --- | --- |
-| `cached=true` | 使用了短时间缓存，没有重新进容器 |
-| `stale=true` | 本次刷新容器超时，返回的是上一次成功状态 |
-| `warning` | 本次刷新失败原因，例如 `docker exec timeout` |
-| `cache_age_sec` | 缓存距上次成功读取的秒数 |
-
-如果你想强制刷新一次：
-
-```bash
-curl "http://127.0.0.1:8080/robot/aurora/state?force_refresh=true"
+```plain
+backend=python-sdk
+connected=true
 ```
-
-如果 docker 权限不够，先执行：
-
-```bash
-sudo usermod -aG docker gr301ab0113
-newgrp docker
-```
-
-必要时重新登录。
 
 ### 8.1 临时先调 HTTP / ROS
 
@@ -474,25 +459,10 @@ export AURORA_MOCK=1
 
 真机正式联调不要长期使用 mock。
 
-### 8.2 宿主机 Python SDK 备用方案
-
-如果后续厂商提供了宿主机可安装的 Python SDK，也可以不用 docker 后端，改成宿主机 Python 后端。
-
-如果厂商 SDK 是 pip 包：
-
-```bash
-cd ~/aurora_ws/gr3
-source .venv/bin/activate
-pip install <厂商提供的 Aurora SDK whl 或包名>
-export AURORA_BACKEND=python
-python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
-```
-
-如果 SDK 在某个本地目录，不在 `.venv` 里：
+### 8.2 SDK 路径或模块名不同
 
 ```bash
 export AURORA_SDK_PATH=/path/to/aurora/python
-export AURORA_BACKEND=python
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
 ./scripts/run_adapter.sh
@@ -516,39 +486,6 @@ curl http://127.0.0.1:8080/robot/aurora/state
 ```plain
 connected=true
 fsm_state=1/2/3/...
-```
-
-### 8.3 容器后端仍然不通时
-
-如果 `AURORA_BACKEND=docker` 仍然不通，按顺序查：
-
-```bash
-docker ps | grep fourier_aurora_server
-docker exec -w /workspace fourier_aurora_server python3 -c "print('DOCKER_PY_OK')"
-docker exec -w /workspace fourier_aurora_server python3 -c "import importlib.util; print(importlib.util.find_spec('fourier_aurora_client')); print(importlib.util.find_spec('aurora_sdk')); print(importlib.util.find_spec('fftai_aurora_sdk'))"
-```
-
-如果接口偶尔返回：
-
-```plain
-docker exec timeout after 20.0s
-```
-
-说明容器内 Python/AuroraClient/DDS 这次初始化或查询超过了超时时间。现在适配层会优先返回短期缓存，避免状态页反复变红。仍频繁超时时，再考虑把 `AURORA_DOCKER_TIMEOUT_SEC` 调到 `30`，或者后续把 Aurora 调用改成常驻 sidecar 服务，而不是每次 HTTP 请求都 `docker exec`。
-
-如果容器里没有 `fourier_aurora_client`，按官方文档需要安装客户端：
-
-```bash
-docker exec -it fourier_aurora_server bash
-pip install fourier-aurora-client
-```
-
-如果容器里模块名不是 `fourier_aurora_client`、`aurora_sdk`、`aurora`、`fftai_aurora_sdk`，就把真实模块名配置进去：
-
-```bash
-export AURORA_CLIENT_MODULE=<真实模块名>
-export AURORA_CLIENT_CLASS=AuroraClient
-./scripts/run_adapter.sh
 ```
 
 ---

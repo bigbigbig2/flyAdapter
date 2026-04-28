@@ -1,227 +1,241 @@
 from __future__ import annotations
 
-import json
-import subprocess
+import importlib
 import sys
 import threading
-import time
 from typing import Any
 
 from app.config import AppConfig
 
 
 class AuroraBridge:
-    """Best-effort Aurora SDK wrapper.
+    """Thin Aurora SDK wrapper.
 
-    The real robot SDK is usually available only on the GR3 runtime image. This
-    bridge keeps the HTTP adapter usable when the SDK is absent, while exposing
-    a clear unavailable state to readiness checks.
+    This follows the verified adapter under D:\\shu\\2: the adapter process is
+    expected to run in a Python environment that can import fourier_aurora_client
+    directly. AuroraClient is created lazily and reused in-process.
     """
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self._client: Any | None = None
+        self._client_cls: Any | None = None
         self._error: str | None = None
         self._import_attempts: list[str] = []
-        self._backend = config.aurora_backend or "docker"
-        self._mock_fsm_state = 2
-        self._docker_lock = threading.Lock()
-        self._state_cache: dict[str, Any] | None = None
-        self._state_cache_at = 0.0
+        self._lock = threading.RLock()
+        self._mock_fsm_state = config.aurora_stand_fsm_state
+        self._last_fsm_state: int | None = None
+
+    @property
+    def available(self) -> bool:
+        if not self.config.aurora_enabled:
+            return False
+        if self.config.aurora_mock:
+            return True
+        if self._client_cls is not None:
+            return True
+        try:
+            self._client_cls = self._import_client()
+            self._error = None
+            return True
+        except Exception as exc:  # pragma: no cover - depends on robot SDK
+            self._error = str(exc)
+            return False
 
     def start(self) -> None:
-        if self.config.aurora_mock:
-            return
-        if self._backend in {"docker", "container"}:
-            self._client = None
-            self._error = None
+        if self.config.aurora_mock or not self.config.aurora_enabled:
             return
         try:
-            if self.config.aurora_sdk_path and self.config.aurora_sdk_path not in sys.path:
-                sys.path.insert(0, self.config.aurora_sdk_path)
-            client_cls = self._import_client()
-            self._client = self._create_client(client_cls)
+            self._client_cls = self._import_client()
+            self._error = None
         except Exception as exc:  # pragma: no cover - depends on robot SDK
-            self._client = None
+            self._client_cls = None
             self._error = str(exc)
 
+    def stop(self) -> None:
+        with self._lock:
+            if self._client is not None and hasattr(self._client, "close"):
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
+            self._client = None
+
     def ping(self) -> dict[str, Any]:
-        state = self.state()
-        return {
-            "connected": state["connected"],
-            "mock": self.config.aurora_mock,
-            "backend": state.get("backend"),
-            "cached": state.get("cached", False),
-            "stale": state.get("stale", False),
-            "cache_age_sec": state.get("cache_age_sec"),
-            "error": state.get("error"),
-            "warning": state.get("warning"),
-        }
+        if self.config.aurora_mock:
+            return {
+                "available": True,
+                "connected": True,
+                "mock": True,
+                "backend": "mock",
+                "domain_id": self.config.aurora_domain_id,
+                "robot_name": self.config.aurora_robot_name,
+            }
+        if not self.config.aurora_enabled:
+            return {
+                "available": False,
+                "connected": False,
+                "mock": False,
+                "backend": "python-sdk",
+                "error": "Aurora is disabled",
+            }
+        try:
+            client = self._connect()
+            return {
+                "available": True,
+                "connected": client is not None,
+                "mock": False,
+                "backend": "python-sdk",
+                "domain_id": self.config.aurora_domain_id,
+                "robot_name": self.config.aurora_robot_name,
+                "import_attempts": self._import_attempts,
+            }
+        except Exception as exc:  # pragma: no cover - depends on robot SDK
+            self._error = str(exc)
+            return {
+                "available": self._client_cls is not None,
+                "connected": False,
+                "mock": False,
+                "backend": "python-sdk",
+                "error": str(exc),
+                "domain_id": self.config.aurora_domain_id,
+                "robot_name": self.config.aurora_robot_name,
+                "import_attempts": self._import_attempts,
+            }
 
     def state(self, force_refresh: bool = False) -> dict[str, Any]:
         if self.config.aurora_mock:
             return {
+                "available": True,
                 "connected": True,
                 "mock": True,
                 "backend": "mock",
                 "fsm_state": self._mock_fsm_state,
-                "standing": self._mock_fsm_state in {1, 2, 3},
+                "standing": self._is_standing(None, self._mock_fsm_state),
             }
-        if self._backend in {"docker", "container"}:
-            if not force_refresh:
-                cached = self._cached_state(fresh_only=True)
-                if cached is not None:
-                    return cached
-            result = self._docker_call("get_fsm")
-            if result.get("success"):
-                fsm_state = self._as_int(result.get("fsm_state"))
-                state = {
-                    "connected": True,
-                    "mock": False,
-                    "backend": "docker",
-                    "container": self.config.aurora_container_name,
-                    "fsm_state": fsm_state,
-                    "standing": fsm_state in {1, 2, 3},
-                    "raw": result,
-                }
-                self._set_state_cache(state)
-                return state
-            cached = self._cached_state(fresh_only=False)
-            if cached is not None:
-                cached["warning"] = result.get("error") or "Aurora docker backend temporarily unavailable"
-                cached["raw_last_error"] = result
-                return cached
+        if not self.config.aurora_enabled:
             return {
-                "connected": False,
-                "mock": False,
-                "backend": "docker",
-                "container": self.config.aurora_container_name,
-                "fsm_state": None,
-                "standing": False,
-                "error": result.get("error") or "Aurora docker backend unavailable",
-                "raw": result,
-            }
-        if self._client is None:
-            return {
+                "available": False,
                 "connected": False,
                 "mock": False,
                 "backend": "python-sdk",
                 "fsm_state": None,
                 "standing": False,
-                "error": self._error or "Aurora SDK unavailable",
-                "sdk_path": self.config.aurora_sdk_path or None,
-                "import_attempts": self._import_attempts,
+                "error": "Aurora is disabled",
             }
         try:
-            fsm_state = self._get_fsm_state()
+            client = self._connect()
+            raw = self._get_state_raw(client)
+            fsm_state = self._extract_fsm_state(raw)
+            if fsm_state is None:
+                fsm_state = self._last_fsm_state
             return {
+                "available": True,
                 "connected": True,
                 "mock": False,
                 "backend": "python-sdk",
                 "fsm_state": fsm_state,
-                "standing": fsm_state in {1, 2, 3},
+                "standing": self._is_standing(raw, fsm_state),
+                "raw": raw,
+                "domain_id": self.config.aurora_domain_id,
+                "robot_name": self.config.aurora_robot_name,
+                "import_attempts": self._import_attempts,
             }
         except Exception as exc:  # pragma: no cover - depends on robot SDK
+            self._error = str(exc)
             return {
+                "available": self._client_cls is not None,
                 "connected": False,
                 "mock": False,
                 "backend": "python-sdk",
-                "fsm_state": None,
-                "standing": False,
+                "fsm_state": self._last_fsm_state,
+                "standing": self._is_standing(None, self._last_fsm_state),
                 "error": str(exc),
                 "sdk_path": self.config.aurora_sdk_path or None,
                 "import_attempts": self._import_attempts,
             }
 
     def set_fsm(self, fsm_state: int) -> dict[str, Any]:
+        state = int(fsm_state)
         if self.config.aurora_mock:
-            self._mock_fsm_state = int(fsm_state)
-            return {"success": True, "fsm_state": self._mock_fsm_state, "mock": True}
-        if self._backend in {"docker", "container"}:
-            result = self._docker_call("set_fsm", str(int(fsm_state)))
-            if result.get("success"):
-                self._set_state_cache(
-                    {
-                        "connected": True,
-                        "mock": False,
-                        "backend": "docker",
-                        "container": self.config.aurora_container_name,
-                        "fsm_state": int(fsm_state),
-                        "standing": int(fsm_state) in {1, 2, 3},
-                        "raw": result,
-                    }
-                )
-                return {"success": True, "fsm_state": int(fsm_state), "backend": "docker", "raw": result}
-            return {"success": False, "message": result.get("error") or "set_fsm failed", "backend": "docker", "raw": result}
-        if self._client is None:
-            return {"success": False, "message": self._error or "Aurora SDK unavailable"}
+            self._mock_fsm_state = state
+            return {"success": True, "fsm_state": state, "mock": True}
         try:
-            if hasattr(self._client, "set_fsm_state"):
-                self._client.set_fsm_state(int(fsm_state))
-            elif hasattr(self._client, "SetFsmState"):
-                self._client.SetFsmState(int(fsm_state))
-            else:
-                raise RuntimeError("Aurora client has no set_fsm_state method")
-            return {"success": True, "fsm_state": int(fsm_state)}
+            client = self._connect()
+            if not hasattr(client, "set_fsm_state"):
+                raise RuntimeError("Current AuroraClient does not provide set_fsm_state")
+            client.set_fsm_state(state)
+            self._last_fsm_state = state
+            return {"success": True, "fsm_state": state, "backend": "python-sdk"}
         except Exception as exc:  # pragma: no cover - depends on robot SDK
-            return {"success": False, "message": str(exc)}
+            self._error = str(exc)
+            return {"success": False, "message": str(exc), "backend": "python-sdk"}
 
     def ensure_stand(self) -> dict[str, Any]:
-        state = self.state()
-        if state.get("standing"):
-            return {"success": True, "message": "already standing", "state": state}
-        # PD stand is the safest documented stand-like target in the notes.
-        result = self.set_fsm(2)
+        result = self.set_fsm(self.config.aurora_stand_fsm_state)
         result["message"] = "stand command sent" if result.get("success") else result.get("message")
         return result
 
-    def stop_motion(self) -> dict[str, Any]:
+    def stop_motion(self, duration: float = 1.0) -> dict[str, Any]:
         if self.config.aurora_mock:
             return {"success": True, "message": "mock stop_motion"}
-        if self._backend in {"docker", "container"}:
-            result = self._docker_call("stop_motion")
-            if result.get("success"):
-                self._clear_state_cache()
-                return {"success": True, "message": result.get("message", "stop_motion"), "backend": "docker", "raw": result}
-            return {"success": False, "message": result.get("error") or "stop_motion failed", "backend": "docker", "raw": result}
-        if self._client is None:
-            return {"success": False, "message": self._error or "Aurora SDK unavailable"}
         try:
-            for method_name in ("stop_motion", "StopMotion", "stop", "Stop"):
-                if hasattr(self._client, method_name):
-                    getattr(self._client, method_name)()
-                    return {"success": True, "message": method_name}
-            return {"success": False, "message": "Aurora client has no stop method"}
+            client = self._connect()
+            if hasattr(client, "set_velocity_source"):
+                client.set_velocity_source(2)
+            if not hasattr(client, "set_velocity"):
+                raise RuntimeError("Current AuroraClient does not provide set_velocity")
+            method = getattr(client, "set_velocity")
+            try:
+                method(0.0, 0.0, 0.0, float(duration))
+                args = (0.0, 0.0, 0.0, float(duration))
+            except TypeError:
+                method(0.0, 0.0, 0.0)
+                args = (0.0, 0.0, 0.0)
+            return {"success": True, "message": "zero velocity command sent", "duration": duration, "args": args}
         except Exception as exc:  # pragma: no cover - depends on robot SDK
-            return {"success": False, "message": str(exc)}
+            self._error = str(exc)
+            return {"success": False, "message": str(exc), "backend": "python-sdk"}
 
-    def _get_fsm_state(self) -> int | None:
-        if self._client is None:
-            return None
-        for method_name in ("get_fsm_state", "GetFsmState"):
-            if hasattr(self._client, method_name):
-                return int(getattr(self._client, method_name)())
-        return None
+    def _connect(self) -> Any:
+        with self._lock:
+            if self._client is not None:
+                return self._client
+            if self._client_cls is None:
+                self._client_cls = self._import_client()
+            self._client = self._create_client(self._client_cls)
+            self._error = None
+            return self._client
 
     def _import_client(self) -> Any:
-        candidates = [
-            ("fourier_aurora_client", "AuroraClient"),
-            ("aurora_sdk", "AuroraClient"),
-            ("aurora", "AuroraClient"),
-            ("fftai_aurora_sdk", "AuroraClient"),
-        ]
+        if self.config.aurora_sdk_path and self.config.aurora_sdk_path not in sys.path:
+            sys.path.insert(0, self.config.aurora_sdk_path)
+
+        candidates = []
         if self.config.aurora_client_module:
-            candidates.insert(
-                0,
-                (self.config.aurora_client_module, self.config.aurora_client_class or "AuroraClient"),
-            )
+            candidates.append((self.config.aurora_client_module, self.config.aurora_client_class or "AuroraClient"))
+        candidates.extend(
+            [
+                ("fourier_aurora_client", "AuroraClient"),
+                ("aurora_sdk", "AuroraClient"),
+                ("aurora", "AuroraClient"),
+                ("fftai_aurora_sdk", "AuroraClient"),
+            ]
+        )
 
         errors: list[str] = []
+        self._import_attempts = []
+        seen: set[tuple[str, str]] = set()
         for module_name, class_name in candidates:
+            key = (module_name, class_name)
+            if key in seen:
+                continue
+            seen.add(key)
             try:
-                module = __import__(module_name, fromlist=[class_name])
+                module = importlib.import_module(module_name)
+                client_cls = getattr(module, class_name)
                 self._import_attempts.append(f"{module_name}.{class_name}: ok")
-                return getattr(module, class_name)
+                return client_cls
             except Exception as exc:  # pragma: no cover - depends on robot SDK
                 message = f"{module_name}.{class_name}: {exc}"
                 errors.append(message)
@@ -235,191 +249,64 @@ class AuroraBridge:
             return client_cls.get_instance(
                 domain_id=self.config.aurora_domain_id,
                 robot_name=self.config.aurora_robot_name,
-                namespace=None,
-                is_ros_compatible=False,
             )
         except TypeError:
             try:
-                return client_cls.get_instance(self.config.aurora_domain_id, robot_name=self.config.aurora_robot_name)
+                return client_cls.get_instance(
+                    domain_id=self.config.aurora_domain_id,
+                    robot_name=self.config.aurora_robot_name,
+                    namespace=None,
+                    is_ros_compatible=False,
+                )
             except TypeError:
-                return client_cls.get_instance(self.config.aurora_robot_name)
+                try:
+                    return client_cls.get_instance(self.config.aurora_domain_id, robot_name=self.config.aurora_robot_name)
+                except TypeError:
+                    return client_cls.get_instance(self.config.aurora_robot_name)
 
-    def _docker_call(self, operation: str, value: str = "") -> dict[str, Any]:
-        script = self._container_script()
-        command = [
-            "docker",
-            "exec",
-            "-w",
-            self.config.aurora_container_workdir,
-            self.config.aurora_container_name,
-            self.config.aurora_container_python,
-            "-c",
-            script,
-            self.config.aurora_robot_name,
-            str(self.config.aurora_domain_id),
-            operation,
-            value,
-            self.config.aurora_client_module,
-            self.config.aurora_client_class or "AuroraClient",
-        ]
-        acquired = self._docker_lock.acquire(timeout=self.config.aurora_docker_lock_timeout_sec)
-        if not acquired:
-            return {"success": False, "error": "Aurora docker backend busy; using cached state if available"}
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=self.config.aurora_docker_timeout_sec,
-            )
-        except FileNotFoundError:
-            return {"success": False, "error": "docker command not found"}
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": f"docker exec timeout after {self.config.aurora_docker_timeout_sec}s"}
-        except Exception as exc:  # pragma: no cover - depends on host docker setup
-            return {"success": False, "error": str(exc)}
-        finally:
-            self._docker_lock.release()
-
-        parsed = self._parse_json_line(completed.stdout)
-        if parsed is not None:
-            parsed["returncode"] = completed.returncode
-            if completed.stderr.strip():
-                parsed["stderr"] = completed.stderr.strip()
-            return parsed
-        return {
-            "success": False,
-            "returncode": completed.returncode,
-            "error": completed.stderr.strip() or completed.stdout.strip() or "docker exec returned no JSON",
-            "stdout": completed.stdout.strip(),
-        }
-
-    def _cached_state(self, fresh_only: bool) -> dict[str, Any] | None:
-        if self._state_cache is None:
-            return None
-        age = time.monotonic() - self._state_cache_at
-        ttl = self.config.aurora_state_cache_ttl_sec if fresh_only else self.config.aurora_state_stale_ttl_sec
-        if age > ttl:
-            return None
-        cached = dict(self._state_cache)
-        cached["cached"] = True
-        cached["cache_age_sec"] = round(age, 3)
-        if not fresh_only:
-            cached["stale"] = True
-        return cached
-
-    def _set_state_cache(self, state: dict[str, Any]) -> None:
-        cached = dict(state)
-        cached.pop("cached", None)
-        cached.pop("stale", None)
-        cached.pop("cache_age_sec", None)
-        cached.pop("warning", None)
-        cached.pop("raw_last_error", None)
-        self._state_cache = cached
-        self._state_cache_at = time.monotonic()
-
-    def _clear_state_cache(self) -> None:
-        self._state_cache = None
-        self._state_cache_at = 0.0
-
-    @staticmethod
-    def _parse_json_line(output: str) -> dict[str, Any] | None:
-        for line in reversed(output.splitlines()):
-            line = line.strip()
-            if not line.startswith("{"):
+    def _get_state_raw(self, client: Any) -> dict[str, Any]:
+        for method_name in ("get_fsm_state", "get_state", "get_robot_state"):
+            if not hasattr(client, method_name):
                 continue
             try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(data, dict):
-                return data
+                value = getattr(client, method_name)()
+                return {"available": True, "method": method_name, "raw": value}
+            except Exception as exc:
+                return {"available": True, "method": method_name, "error": str(exc)}
+        return {"available": True, "warning": "No known state getter on current AuroraClient object"}
+
+    @staticmethod
+    def _extract_fsm_state(raw: Any) -> int | None:
+        if isinstance(raw, dict):
+            for key in ("fsm_state", "state"):
+                value = raw.get(key)
+                if isinstance(value, int):
+                    return value
+            nested = raw.get("raw")
+            if nested is not raw:
+                return AuroraBridge._extract_fsm_state(nested)
+        for key in ("fsm_state", "state"):
+            if hasattr(raw, key):
+                value = getattr(raw, key)
+                if isinstance(value, int):
+                    return value
+        if isinstance(raw, int):
+            return raw
         return None
 
-    @staticmethod
-    def _as_int(value: Any) -> int | None:
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _container_script() -> str:
-        return r'''
-import importlib
-import json
-import sys
-import traceback
-
-robot_name = sys.argv[1]
-domain_id = int(sys.argv[2])
-operation = sys.argv[3]
-value = sys.argv[4] if len(sys.argv) > 4 else ""
-module_override = sys.argv[5] if len(sys.argv) > 5 else ""
-class_name = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else "AuroraClient"
-
-def emit(payload):
-    print(json.dumps(payload, ensure_ascii=False))
-
-def call_first(obj, names, *args):
-    tried = []
-    for name in names:
-        tried.append(name)
-        method = getattr(obj, name, None)
-        if method is None:
-            continue
-        return method(*args), name
-    raise RuntimeError("no supported method, tried: " + ",".join(tried))
-
-candidates = []
-if module_override:
-    candidates.append((module_override, class_name))
-candidates.extend([
-    ("fourier_aurora_client", "AuroraClient"),
-    ("aurora_sdk", "AuroraClient"),
-    ("aurora", "AuroraClient"),
-    ("fftai_aurora_sdk", "AuroraClient"),
-])
-
-attempts = []
-try:
-    client_cls = None
-    for module_name, cls_name in candidates:
-        try:
-            module = importlib.import_module(module_name)
-            client_cls = getattr(module, cls_name)
-            attempts.append(f"{module_name}.{cls_name}: ok")
-            break
-        except Exception as exc:
-            attempts.append(f"{module_name}.{cls_name}: {exc}")
-    if client_cls is None:
-        raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(attempts))
-
-    if hasattr(client_cls, "get_instance"):
-        try:
-            client = client_cls.get_instance(domain_id=domain_id, robot_name=robot_name, namespace=None, is_ros_compatible=False)
-        except TypeError:
-            try:
-                client = client_cls.get_instance(domain_id, robot_name=robot_name)
-            except TypeError:
-                client = client_cls.get_instance(robot_name)
-    else:
-        client = client_cls()
-
-    if operation == "get_fsm":
-        result, method = call_first(client, ["get_fsm_state", "GetFsmState", "getFsmState", "get_fsm"])
-        emit({"success": True, "operation": operation, "fsm_state": result, "method": method, "import_attempts": attempts})
-    elif operation == "set_fsm":
-        result, method = call_first(client, ["set_fsm_state", "SetFsmState", "setFsmState", "set_fsm"], int(value))
-        emit({"success": True, "operation": operation, "fsm_state": int(value), "method": method, "result": str(result), "import_attempts": attempts})
-    elif operation == "stop_motion":
-        result, method = call_first(client, ["stop_motion", "StopMotion", "stop", "Stop"])
-        emit({"success": True, "operation": operation, "method": method, "message": str(result), "import_attempts": attempts})
-    else:
-        raise RuntimeError("unknown operation: " + operation)
-except Exception as exc:
-    emit({"success": False, "operation": operation, "error": str(exc), "traceback": traceback.format_exc(), "import_attempts": attempts})
-'''
+    def _is_standing(self, raw: Any, fsm_state: int | None) -> bool:
+        state_names = {"PdStand", "JointStand", "PD_STAND", "JOINT_STAND"}
+        if isinstance(raw, dict):
+            for key in ("fsm_state_name", "state_name", "fsm_name"):
+                value = raw.get(key)
+                if isinstance(value, str):
+                    return value in state_names
+            nested = raw.get("raw")
+            if nested is not raw and nested is not None:
+                return self._is_standing(nested, fsm_state)
+        for key in ("fsm_state_name", "state_name", "fsm_name"):
+            if hasattr(raw, key):
+                value = getattr(raw, key)
+                if isinstance(value, str):
+                    return value in state_names
+        return fsm_state in {1, 2, 3, self.config.aurora_stand_fsm_state}

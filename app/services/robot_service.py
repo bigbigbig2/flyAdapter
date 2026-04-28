@@ -44,6 +44,7 @@ class RobotService:
 
     def stop(self) -> None:
         self.stop_cruise()
+        self.aurora.stop()
         self.ros.stop()
 
     def legacy_status(self) -> dict[str, Any]:
@@ -131,9 +132,6 @@ class RobotService:
             warnings.append("aurora_unavailable")
         elif not aurora.get("standing"):
             warnings.append("robot_not_standing")
-        if aurora.get("stale"):
-            warnings.append("aurora_state_stale")
-
         return {
             "ready": not blockers,
             "blockers": blockers,
@@ -147,8 +145,6 @@ class RobotService:
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
                 "aurora_connected": bool(aurora.get("connected")),
                 "robot_standing": bool(aurora.get("standing")),
-                "aurora_cached": bool(aurora.get("cached")),
-                "aurora_stale": bool(aurora.get("stale")),
             },
         }
 
@@ -275,7 +271,10 @@ class RobotService:
             self.state.mark_error("cruise precheck failed", status_code=409)
             return {"status": "blocked", "message": "cruise precheck failed", "precheck": check, **self.legacy_status()}
 
-        self.stop_cruise(cancel_robot=False)
+        if self.state.snapshot()["is_cruising"]:
+            self.stop_cruise(cancel_robot=True)
+        else:
+            self.stop_cruise(cancel_robot=False)
         self._cruise_stop.clear()
         self._cruise_pause.clear()
         self.state.is_cruising = True
@@ -292,12 +291,17 @@ class RobotService:
         was_cruising = self.state.snapshot()["is_cruising"]
         self._cruise_stop.set()
         self._cruise_pause.clear()
+        thread = self._cruise_thread
         if cancel_robot:
             try:
                 self.ros.cancel_current_action()
             except Exception:
                 pass
             self.aurora.stop_motion()
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+            if not thread.is_alive():
+                self._cruise_thread = None
         self.state.is_cruising = False
         self.state.is_paused = False
         self.state.set_navigation_task({"status": "idle"})
@@ -412,6 +416,8 @@ class RobotService:
             self.state.is_cruising = False
             self.state.is_paused = False
             self.events.publish({"event_type": "cruise_complete", "timestamp": now_ms(), "message": "all navigation points completed", "total_points": len(points), "current_nav_name": self.state.current_nav_name})
+        if self._cruise_thread is threading.current_thread():
+            self._cruise_thread = None
 
     def _safe_ros_call(self, fn: Any, action_name: str) -> dict[str, Any]:
         try:

@@ -66,7 +66,12 @@ async function loadPoints(updateLast = true) {
   for (const point of data.nav_points || []) {
     const item = document.createElement("div");
     item.className = "point";
-    item.innerHTML = `<strong>${point.name}</strong><span>x=${Number(point.x).toFixed(2)}, y=${Number(point.y).toFixed(2)}</span>`;
+    const name = document.createElement("strong");
+    name.textContent = point.name || "-";
+    const coords = document.createElement("span");
+    coords.textContent = `x=${Number(point.x).toFixed(2)}, y=${Number(point.y).toFixed(2)}`;
+    item.appendChild(name);
+    item.appendChild(coords);
     list.appendChild(item);
   }
 }

@@ -13,20 +13,18 @@ GR301AA0025
 ```bash
 cd ~/aurora_ws/gr3
 
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
-python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
+python -c "import numpy; import rclpy; from fourier_aurora_client import AuroraClient; print('PY_ROS_AURORA_IMPORT_OK')"
 
-export AURORA_BACKEND=docker
-export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
-export AURORA_DOCKER_TIMEOUT_SEC=20
-export AURORA_STATE_CACHE_TTL_SEC=10
+export AURORA_STAND_FSM_STATE=2
 
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh
@@ -43,7 +41,7 @@ chmod +x scripts/run_adapter.sh
 - 外部兼容层：`/slam/...`、`/audio/...`
 - 内部调试层：`/robot/...`
 - ROS2 桥接：HumanoidNav 的 topic/service/action
-- Aurora 桥接：站立、FSM、停止运动等底层状态和安全动作
+- Aurora 桥接：按 `D:\shu\2` 已验证方式直接 import `fourier_aurora_client`，进程内复用 AuroraClient，处理站立、FSM、停止运动等底层状态和安全动作
 - 本地数据：导航点、巡航文件、runtime 状态
 
 详见：
