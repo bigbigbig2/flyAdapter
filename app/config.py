@@ -34,6 +34,7 @@ class AppConfig:
     require_aurora: bool
     aurora_mock: bool
     aurora_robot_name: str
+    aurora_domain_id: int
     aurora_backend: str
     aurora_container_name: str
     aurora_container_workdir: str
@@ -76,6 +77,7 @@ def load_config() -> AppConfig:
         require_aurora=_bool_env("REQUIRE_AURORA", False),
         aurora_mock=_bool_env("AURORA_MOCK", False),
         aurora_robot_name=os.getenv("AURORA_ROBOT_NAME", "gr3v233"),
+        aurora_domain_id=int(os.getenv("AURORA_DOMAIN_ID", "123")),
         aurora_backend=os.getenv("AURORA_BACKEND", "docker").strip().lower(),
         aurora_container_name=os.getenv("AURORA_CONTAINER_NAME", "fourier_aurora_server"),
         aurora_container_workdir=os.getenv("AURORA_CONTAINER_WORKDIR", "/workspace"),

@@ -23,6 +23,8 @@ python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 
 export AURORA_BACKEND=docker
 export AURORA_CONTAINER_NAME=fourier_aurora_server
+export AURORA_DOMAIN_ID=123
+export AURORA_CLIENT_MODULE=fourier_aurora_client
 
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh

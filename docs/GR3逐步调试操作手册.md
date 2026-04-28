@@ -394,13 +394,16 @@ export AURORA_BACKEND=docker
 export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_CONTAINER_WORKDIR=/workspace
 export AURORA_CONTAINER_PYTHON=python3
+export AURORA_DOMAIN_ID=123
+export AURORA_CLIENT_MODULE=fourier_aurora_client
+export AURORA_CLIENT_CLASS=AuroraClient
 ```
 
 先确认容器里是否能找到 SDK：
 
 ```bash
 sudo docker exec -it fourier_aurora_server bash
-python3 -c "import importlib.util; print('aurora_sdk', importlib.util.find_spec('aurora_sdk')); print('aurora', importlib.util.find_spec('aurora')); print('fftai_aurora_sdk', importlib.util.find_spec('fftai_aurora_sdk'))"
+python3 -c "import importlib.util; print('fourier_aurora_client', importlib.util.find_spec('fourier_aurora_client')); print('aurora_sdk', importlib.util.find_spec('aurora_sdk')); print('aurora', importlib.util.find_spec('aurora')); print('fftai_aurora_sdk', importlib.util.find_spec('fftai_aurora_sdk'))"
 ```
 
 如果这里能找到 SDK，adapter 重启后应该通过 docker 后端调用它：
@@ -411,6 +414,8 @@ source .venv/bin/activate
 export AURORA_BACKEND=docker
 export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_ROBOT_NAME=gr3v233
+export AURORA_DOMAIN_ID=123
+export AURORA_CLIENT_MODULE=fourier_aurora_client
 ./scripts/run_adapter.sh
 ```
 
@@ -462,7 +467,7 @@ cd ~/aurora_ws/gr3
 source .venv/bin/activate
 pip install <厂商提供的 Aurora SDK whl 或包名>
 export AURORA_BACKEND=python
-python -c "from fftai_aurora_sdk import AuroraClient; print(AuroraClient)"
+python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
 ```
 
 如果 SDK 在某个本地目录，不在 `.venv` 里：
@@ -470,7 +475,7 @@ python -c "from fftai_aurora_sdk import AuroraClient; print(AuroraClient)"
 ```bash
 export AURORA_SDK_PATH=/path/to/aurora/python
 export AURORA_BACKEND=python
-export AURORA_CLIENT_MODULE=fftai_aurora_sdk
+export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
 ./scripts/run_adapter.sh
 ```
@@ -502,10 +507,17 @@ fsm_state=1/2/3/...
 ```bash
 docker ps | grep fourier_aurora_server
 docker exec -w /workspace fourier_aurora_server python3 -c "print('DOCKER_PY_OK')"
-docker exec -w /workspace fourier_aurora_server python3 -c "import importlib.util; print(importlib.util.find_spec('aurora_sdk')); print(importlib.util.find_spec('fftai_aurora_sdk'))"
+docker exec -w /workspace fourier_aurora_server python3 -c "import importlib.util; print(importlib.util.find_spec('fourier_aurora_client')); print(importlib.util.find_spec('aurora_sdk')); print(importlib.util.find_spec('fftai_aurora_sdk'))"
 ```
 
-如果容器里模块名不是 `aurora_sdk`、`aurora`、`fftai_aurora_sdk`，就把真实模块名配置进去：
+如果容器里没有 `fourier_aurora_client`，按官方文档需要安装客户端：
+
+```bash
+docker exec -it fourier_aurora_server bash
+pip install fourier-aurora-client
+```
+
+如果容器里模块名不是 `fourier_aurora_client`、`aurora_sdk`、`aurora`、`fftai_aurora_sdk`，就把真实模块名配置进去：
 
 ```bash
 export AURORA_CLIENT_MODULE=<真实模块名>

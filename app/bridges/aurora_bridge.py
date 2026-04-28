@@ -35,10 +35,7 @@ class AuroraBridge:
             if self.config.aurora_sdk_path and self.config.aurora_sdk_path not in sys.path:
                 sys.path.insert(0, self.config.aurora_sdk_path)
             client_cls = self._import_client()
-            if hasattr(client_cls, "get_instance"):
-                self._client = client_cls.get_instance(self.config.aurora_robot_name)
-            else:
-                self._client = client_cls()
+            self._client = self._create_client(client_cls)
         except Exception as exc:  # pragma: no cover - depends on robot SDK
             self._client = None
             self._error = str(exc)
@@ -175,6 +172,7 @@ class AuroraBridge:
 
     def _import_client(self) -> Any:
         candidates = [
+            ("fourier_aurora_client", "AuroraClient"),
             ("aurora_sdk", "AuroraClient"),
             ("aurora", "AuroraClient"),
             ("fftai_aurora_sdk", "AuroraClient"),
@@ -197,6 +195,22 @@ class AuroraBridge:
                 self._import_attempts.append(message)
         raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(errors))
 
+    def _create_client(self, client_cls: Any) -> Any:
+        if not hasattr(client_cls, "get_instance"):
+            return client_cls()
+        try:
+            return client_cls.get_instance(
+                domain_id=self.config.aurora_domain_id,
+                robot_name=self.config.aurora_robot_name,
+                namespace=None,
+                is_ros_compatible=False,
+            )
+        except TypeError:
+            try:
+                return client_cls.get_instance(self.config.aurora_domain_id, robot_name=self.config.aurora_robot_name)
+            except TypeError:
+                return client_cls.get_instance(self.config.aurora_robot_name)
+
     def _docker_call(self, operation: str, value: str = "") -> dict[str, Any]:
         script = self._container_script()
         command = [
@@ -209,6 +223,7 @@ class AuroraBridge:
             "-c",
             script,
             self.config.aurora_robot_name,
+            str(self.config.aurora_domain_id),
             operation,
             value,
             self.config.aurora_client_module,
@@ -274,10 +289,11 @@ import sys
 import traceback
 
 robot_name = sys.argv[1]
-operation = sys.argv[2]
-value = sys.argv[3] if len(sys.argv) > 3 else ""
-module_override = sys.argv[4] if len(sys.argv) > 4 else ""
-class_name = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "AuroraClient"
+domain_id = int(sys.argv[2])
+operation = sys.argv[3]
+value = sys.argv[4] if len(sys.argv) > 4 else ""
+module_override = sys.argv[5] if len(sys.argv) > 5 else ""
+class_name = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else "AuroraClient"
 
 def emit(payload):
     print(json.dumps(payload, ensure_ascii=False))
@@ -296,6 +312,7 @@ candidates = []
 if module_override:
     candidates.append((module_override, class_name))
 candidates.extend([
+    ("fourier_aurora_client", "AuroraClient"),
     ("aurora_sdk", "AuroraClient"),
     ("aurora", "AuroraClient"),
     ("fftai_aurora_sdk", "AuroraClient"),
@@ -316,7 +333,13 @@ try:
         raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(attempts))
 
     if hasattr(client_cls, "get_instance"):
-        client = client_cls.get_instance(robot_name)
+        try:
+            client = client_cls.get_instance(domain_id=domain_id, robot_name=robot_name, namespace=None, is_ros_compatible=False)
+        except TypeError:
+            try:
+                client = client_cls.get_instance(domain_id, robot_name=robot_name)
+            except TypeError:
+                client = client_cls.get_instance(robot_name)
     else:
         client = client_cls()
 

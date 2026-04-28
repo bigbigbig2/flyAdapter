@@ -102,6 +102,8 @@ Aurora SDK 按现场文档默认走容器后端：
 ```bash
 export AURORA_BACKEND=docker
 export AURORA_CONTAINER_NAME=fourier_aurora_server
+export AURORA_DOMAIN_ID=123
+export AURORA_CLIENT_MODULE=fourier_aurora_client
 ```
 
 默认 `REQUIRE_AURORA=0`，便于 Aurora 容器权限或 SDK 模块名还没确认时先调 HTTP 和 ROS；真机安全部署时建议在 Aurora 后端连通后改成：
