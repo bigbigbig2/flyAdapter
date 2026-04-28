@@ -397,6 +397,9 @@ export AURORA_CONTAINER_PYTHON=python3
 export AURORA_DOMAIN_ID=123
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
+export AURORA_DOCKER_TIMEOUT_SEC=20
+export AURORA_STATE_CACHE_TTL_SEC=3
+export AURORA_STATE_STALE_TTL_SEC=60
 ```
 
 先确认容器里是否能找到 SDK：
@@ -427,6 +430,21 @@ curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 ```
 
 返回里会带 `backend=docker`、`container=fourier_aurora_server` 和 `raw.import_attempts`，用来判断容器内到底 import 到哪个模块。
+
+Adapter 会缓存 Aurora 状态，避免 Web 页面、`/robot/status`、`/robot/readiness` 连续刷新时反复 `docker exec` 拉起 DDS 客户端。字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `cached=true` | 使用了短时间缓存，没有重新进容器 |
+| `stale=true` | 本次刷新容器超时，返回的是上一次成功状态 |
+| `warning` | 本次刷新失败原因，例如 `docker exec timeout` |
+| `cache_age_sec` | 缓存距上次成功读取的秒数 |
+
+如果你想强制刷新一次：
+
+```bash
+curl "http://127.0.0.1:8080/robot/aurora/state?force_refresh=true"
+```
 
 如果 docker 权限不够，先执行：
 
@@ -509,6 +527,14 @@ docker ps | grep fourier_aurora_server
 docker exec -w /workspace fourier_aurora_server python3 -c "print('DOCKER_PY_OK')"
 docker exec -w /workspace fourier_aurora_server python3 -c "import importlib.util; print(importlib.util.find_spec('fourier_aurora_client')); print(importlib.util.find_spec('aurora_sdk')); print(importlib.util.find_spec('fftai_aurora_sdk'))"
 ```
+
+如果接口偶尔返回：
+
+```plain
+docker exec timeout after 20.0s
+```
+
+说明容器内 Python/AuroraClient/DDS 这次初始化或查询超过了超时时间。现在适配层会优先返回短期缓存，避免状态页反复变红。仍频繁超时时，再考虑把 `AURORA_DOCKER_TIMEOUT_SEC` 调到 `30`，或者后续把 Aurora 调用改成常驻 sidecar 服务，而不是每次 HTTP 请求都 `docker exec`。
 
 如果容器里没有 `fourier_aurora_client`，按官方文档需要安装客户端：
 

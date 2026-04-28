@@ -104,7 +104,12 @@ export AURORA_BACKEND=docker
 export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_DOMAIN_ID=123
 export AURORA_CLIENT_MODULE=fourier_aurora_client
+export AURORA_DOCKER_TIMEOUT_SEC=20
+export AURORA_STATE_CACHE_TTL_SEC=3
+export AURORA_STATE_STALE_TTL_SEC=60
 ```
+
+容器后端不要在每次状态页刷新时都重新拉起 Aurora DDS 客户端。适配层对 Aurora 状态做短时间缓存：3 秒内直接复用最近结果；容器偶发超时时，60 秒内返回上一次成功状态并标记 `stale=true`、`warning=...`。如果后续现场仍然频繁超时，建议把 Aurora 访问进一步拆成常驻 sidecar 服务。
 
 默认 `REQUIRE_AURORA=0`，便于 Aurora 容器权限或 SDK 模块名还没确认时先调 HTTP 和 ROS；真机安全部署时建议在 Aurora 后端连通后改成：
 

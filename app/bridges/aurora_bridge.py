@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
+import time
 from typing import Any
 
 from app.config import AppConfig
@@ -23,6 +25,9 @@ class AuroraBridge:
         self._import_attempts: list[str] = []
         self._backend = config.aurora_backend or "docker"
         self._mock_fsm_state = 2
+        self._docker_lock = threading.Lock()
+        self._state_cache: dict[str, Any] | None = None
+        self._state_cache_at = 0.0
 
     def start(self) -> None:
         if self.config.aurora_mock:
@@ -45,10 +50,15 @@ class AuroraBridge:
         return {
             "connected": state["connected"],
             "mock": self.config.aurora_mock,
+            "backend": state.get("backend"),
+            "cached": state.get("cached", False),
+            "stale": state.get("stale", False),
+            "cache_age_sec": state.get("cache_age_sec"),
             "error": state.get("error"),
+            "warning": state.get("warning"),
         }
 
-    def state(self) -> dict[str, Any]:
+    def state(self, force_refresh: bool = False) -> dict[str, Any]:
         if self.config.aurora_mock:
             return {
                 "connected": True,
@@ -58,10 +68,14 @@ class AuroraBridge:
                 "standing": self._mock_fsm_state in {1, 2, 3},
             }
         if self._backend in {"docker", "container"}:
+            if not force_refresh:
+                cached = self._cached_state(fresh_only=True)
+                if cached is not None:
+                    return cached
             result = self._docker_call("get_fsm")
             if result.get("success"):
                 fsm_state = self._as_int(result.get("fsm_state"))
-                return {
+                state = {
                     "connected": True,
                     "mock": False,
                     "backend": "docker",
@@ -70,6 +84,13 @@ class AuroraBridge:
                     "standing": fsm_state in {1, 2, 3},
                     "raw": result,
                 }
+                self._set_state_cache(state)
+                return state
+            cached = self._cached_state(fresh_only=False)
+            if cached is not None:
+                cached["warning"] = result.get("error") or "Aurora docker backend temporarily unavailable"
+                cached["raw_last_error"] = result
+                return cached
             return {
                 "connected": False,
                 "mock": False,
@@ -119,6 +140,17 @@ class AuroraBridge:
         if self._backend in {"docker", "container"}:
             result = self._docker_call("set_fsm", str(int(fsm_state)))
             if result.get("success"):
+                self._set_state_cache(
+                    {
+                        "connected": True,
+                        "mock": False,
+                        "backend": "docker",
+                        "container": self.config.aurora_container_name,
+                        "fsm_state": int(fsm_state),
+                        "standing": int(fsm_state) in {1, 2, 3},
+                        "raw": result,
+                    }
+                )
                 return {"success": True, "fsm_state": int(fsm_state), "backend": "docker", "raw": result}
             return {"success": False, "message": result.get("error") or "set_fsm failed", "backend": "docker", "raw": result}
         if self._client is None:
@@ -149,6 +181,7 @@ class AuroraBridge:
         if self._backend in {"docker", "container"}:
             result = self._docker_call("stop_motion")
             if result.get("success"):
+                self._clear_state_cache()
                 return {"success": True, "message": result.get("message", "stop_motion"), "backend": "docker", "raw": result}
             return {"success": False, "message": result.get("error") or "stop_motion failed", "backend": "docker", "raw": result}
         if self._client is None:
@@ -229,6 +262,9 @@ class AuroraBridge:
             self.config.aurora_client_module,
             self.config.aurora_client_class or "AuroraClient",
         ]
+        acquired = self._docker_lock.acquire(timeout=self.config.aurora_docker_lock_timeout_sec)
+        if not acquired:
+            return {"success": False, "error": "Aurora docker backend busy; using cached state if available"}
         try:
             completed = subprocess.run(
                 command,
@@ -243,6 +279,8 @@ class AuroraBridge:
             return {"success": False, "error": f"docker exec timeout after {self.config.aurora_docker_timeout_sec}s"}
         except Exception as exc:  # pragma: no cover - depends on host docker setup
             return {"success": False, "error": str(exc)}
+        finally:
+            self._docker_lock.release()
 
         parsed = self._parse_json_line(completed.stdout)
         if parsed is not None:
@@ -256,6 +294,34 @@ class AuroraBridge:
             "error": completed.stderr.strip() or completed.stdout.strip() or "docker exec returned no JSON",
             "stdout": completed.stdout.strip(),
         }
+
+    def _cached_state(self, fresh_only: bool) -> dict[str, Any] | None:
+        if self._state_cache is None:
+            return None
+        age = time.monotonic() - self._state_cache_at
+        ttl = self.config.aurora_state_cache_ttl_sec if fresh_only else self.config.aurora_state_stale_ttl_sec
+        if age > ttl:
+            return None
+        cached = dict(self._state_cache)
+        cached["cached"] = True
+        cached["cache_age_sec"] = round(age, 3)
+        if not fresh_only:
+            cached["stale"] = True
+        return cached
+
+    def _set_state_cache(self, state: dict[str, Any]) -> None:
+        cached = dict(state)
+        cached.pop("cached", None)
+        cached.pop("stale", None)
+        cached.pop("cache_age_sec", None)
+        cached.pop("warning", None)
+        cached.pop("raw_last_error", None)
+        self._state_cache = cached
+        self._state_cache_at = time.monotonic()
+
+    def _clear_state_cache(self) -> None:
+        self._state_cache = None
+        self._state_cache_at = 0.0
 
     @staticmethod
     def _parse_json_line(output: str) -> dict[str, Any] | None:

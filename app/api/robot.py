@@ -274,9 +274,9 @@ def aurora_ping(request: Request) -> dict:
 
 
 @router.get("/aurora/state", summary="查询 Aurora 状态")
-def aurora_state(request: Request) -> dict:
+def aurora_state(request: Request, force_refresh: bool = Query(default=False)) -> dict:
     """返回 Aurora FSM、是否站立、是否 mock、错误信息等。"""
-    return service(request).aurora.state()
+    return service(request).aurora.state(force_refresh=force_refresh)
 
 
 @router.post("/aurora/fsm", summary="设置 Aurora FSM")
