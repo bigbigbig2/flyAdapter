@@ -8,15 +8,15 @@ from app.core.utils import pose_dict, quaternion_from_yaw
 
 
 class PoseIn(BaseModel):
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    yaw: float | None = None
-    q_x: float = 0.0
-    q_y: float = 0.0
-    q_z: float = 0.0
-    q_w: float = 1.0
-    frame_id: str = "map"
+    x: float = Field(default=0.0, description="目标或初始位姿的 x 坐标，单位米")
+    y: float = Field(default=0.0, description="目标或初始位姿的 y 坐标，单位米")
+    z: float = Field(default=0.0, description="目标或初始位姿的 z 坐标，通常为 0")
+    yaw: float | None = Field(default=None, description="航向角，单位弧度；填写后会自动转换为四元数")
+    q_x: float = Field(default=0.0, description="姿态四元数 x；未填写 yaw 时生效")
+    q_y: float = Field(default=0.0, description="姿态四元数 y；未填写 yaw 时生效")
+    q_z: float = Field(default=0.0, description="姿态四元数 z；未填写 yaw 时生效")
+    q_w: float = Field(default=1.0, description="姿态四元数 w；未填写 yaw 时生效")
+    frame_id: str = Field(default="map", description="ROS 坐标系，通常使用 map")
 
     def to_pose_dict(self) -> dict[str, Any]:
         quat = quaternion_from_yaw(self.yaw) if self.yaw is not None else {
@@ -38,63 +38,63 @@ class PoseIn(BaseModel):
 
 
 class RelocationRequest(BaseModel):
-    map_path: str | None = None
-    path: str | None = None
-    init_pose: PoseIn | None = None
-    x: float | None = None
-    y: float | None = None
-    z: float | None = None
-    yaw: float | None = None
-    wait_for_localization: bool = False
+    map_path: str | None = Field(default=None, description="地图目录路径，例如 /opt/fftai/nav/map")
+    path: str | None = Field(default=None, description="兼容字段，等同于 map_path")
+    init_pose: PoseIn | None = Field(default=None, description="加载地图后的初始位姿")
+    x: float | None = Field(default=None, description="兼容旧接口的初始 x 坐标")
+    y: float | None = Field(default=None, description="兼容旧接口的初始 y 坐标")
+    z: float | None = Field(default=None, description="兼容旧接口的初始 z 坐标")
+    yaw: float | None = Field(default=None, description="兼容旧接口的初始航向角，单位弧度")
+    wait_for_localization: bool = Field(default=False, description="是否等待 odom_status_code 变为 GOOD 后再返回")
 
 
 class AddNavPointRequest(BaseModel):
-    name: str = ""
+    name: str = Field(default="", description="导航点名称；为空时由适配层自动生成")
 
 
 class SetMapPathRequest(BaseModel):
-    path: str
+    path: str = Field(description="只写入适配层 runtime 的地图路径")
 
 
 class NavigateToRequest(PoseIn):
-    name: str = "API Target"
-    force: bool = False
+    name: str = Field(default="API Target", description="本次导航目标名称，用于状态和事件展示")
+    force: bool = Field(default=False, description="是否跳过 readiness blocker 强制下发导航")
 
 
 class StartShowCruiseRequest(BaseModel):
-    name: str
-    force: bool = False
+    name: str = Field(description="巡航点文件名称，不需要写 .json")
+    force: bool = Field(default=False, description="是否跳过 readiness blocker 强制开始巡航")
 
 
 class TalkTextRequest(BaseModel):
-    text: str
+    text: str = Field(description="需要朗读的文本；当前实现为兼容 no-op")
 
 
 class SlamModeRequest(BaseModel):
-    mode: str
+    mode: str = Field(description="HumanoidNav 模式，通常为 mapping 或 localization")
 
 
 class MapSaveRequest(BaseModel):
-    map_name: str | None = None
-    map_path: str | None = None
+    map_name: str | None = Field(default=None, description="地图名称；可由服务侧解析为保存路径")
+    map_path: str | None = Field(default=None, description="地图保存目录路径")
 
 
 class MapLoadRequest(BaseModel):
-    map_path: str
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    yaw: float = 0.0
-    wait_for_localization: bool = True
+    map_path: str = Field(description="地图目录路径，例如 /opt/fftai/nav/map")
+    x: float = Field(default=0.0, description="加载地图后的初始 x 坐标")
+    y: float = Field(default=0.0, description="加载地图后的初始 y 坐标")
+    z: float = Field(default=0.0, description="加载地图后的初始 z 坐标")
+    yaw: float = Field(default=0.0, description="加载地图后的初始航向角，单位弧度")
+    wait_for_localization: bool = Field(default=True, description="是否等待定位状态 GOOD 后再返回")
 
 
 class MapLoadByNameRequest(BaseModel):
-    map_name: str
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    yaw: float = 0.0
-    wait_for_localization: bool = True
+    map_name: str = Field(description="MAP_ROOT 下的地图目录名")
+    x: float = Field(default=0.0, description="加载地图后的初始 x 坐标")
+    y: float = Field(default=0.0, description="加载地图后的初始 y 坐标")
+    z: float = Field(default=0.0, description="加载地图后的初始 z 坐标")
+    yaw: float = Field(default=0.0, description="加载地图后的初始航向角，单位弧度")
+    wait_for_localization: bool = Field(default=True, description="是否等待定位状态 GOOD 后再返回")
 
 
 class InitialPoseRequest(PoseIn):
@@ -102,31 +102,31 @@ class InitialPoseRequest(PoseIn):
 
 
 class GotoPoseRequest(BaseModel):
-    pose: PoseIn
-    label: str = "API Target"
-    force: bool = False
+    pose: PoseIn = Field(description="导航目标位姿")
+    label: str = Field(default="API Target", description="本次导航任务标签")
+    force: bool = Field(default=False, description="是否跳过 readiness blocker 强制下发导航")
 
 
 class GotoPoiRequest(BaseModel):
-    name: str
-    map_name: str | None = None
-    force: bool = False
+    name: str = Field(description="POI 名称")
+    map_name: str | None = Field(default=None, description="地图名称，用于后续按地图过滤 POI")
+    force: bool = Field(default=False, description="是否跳过 readiness blocker 强制下发导航")
 
 
 class Poi(BaseModel):
-    name: str
-    map_name: str | None = None
-    x: float
-    y: float
-    z: float = 0.0
-    yaw: float | None = None
-    q_x: float = 0.0
-    q_y: float = 0.0
-    q_z: float = 0.0
-    q_w: float = 1.0
-    frame_id: str = "map"
-    tags: list[str] = Field(default_factory=list)
-    meta: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(description="POI 名称")
+    map_name: str | None = Field(default=None, description="POI 所属地图名称")
+    x: float = Field(description="POI x 坐标，单位米")
+    y: float = Field(description="POI y 坐标，单位米")
+    z: float = Field(default=0.0, description="POI z 坐标，通常为 0")
+    yaw: float | None = Field(default=None, description="POI 航向角，单位弧度；填写后会自动转换为四元数")
+    q_x: float = Field(default=0.0, description="POI 四元数 x；未填写 yaw 时生效")
+    q_y: float = Field(default=0.0, description="POI 四元数 y；未填写 yaw 时生效")
+    q_z: float = Field(default=0.0, description="POI 四元数 z；未填写 yaw 时生效")
+    q_w: float = Field(default=1.0, description="POI 四元数 w；未填写 yaw 时生效")
+    frame_id: str = Field(default="map", description="ROS 坐标系，通常使用 map")
+    tags: list[str] = Field(default_factory=list, description="POI 标签，便于业务侧过滤")
+    meta: dict[str, Any] = Field(default_factory=dict, description="POI 扩展信息")
 
     def to_nav_point(self) -> dict[str, Any]:
         pose = PoseIn(
@@ -157,33 +157,33 @@ class Poi(BaseModel):
 
 
 class PoiUpsertRequest(BaseModel):
-    poi: Poi
+    poi: Poi = Field(description="需要新增或覆盖的 POI")
 
 
 class SaveCurrentPoiRequest(BaseModel):
-    name: str
-    map_name: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    meta: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(description="要保存的 POI 名称")
+    map_name: str | None = Field(default=None, description="POI 所属地图名称")
+    tags: list[str] = Field(default_factory=list, description="POI 标签")
+    meta: dict[str, Any] = Field(default_factory=dict, description="POI 扩展信息")
 
 
 class Route(BaseModel):
-    name: str
-    map_name: str | None = None
-    points: list[str]
-    meta: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(description="路线名称")
+    map_name: str | None = Field(default=None, description="路线所属地图名称")
+    points: list[str] = Field(description="路线包含的 POI 名称列表，按顺序执行")
+    meta: dict[str, Any] = Field(default_factory=dict, description="路线扩展信息")
 
 
 class RouteUpsertRequest(BaseModel):
-    route: Route
+    route: Route = Field(description="需要新增或覆盖的路线")
 
 
 class PatrolStartRequest(BaseModel):
-    route_name: str
-    map_name: str | None = None
-    loop: bool = False
-    force: bool = False
+    route_name: str = Field(description="要启动的路线名称")
+    map_name: str | None = Field(default=None, description="路线所属地图名称")
+    loop: bool = Field(default=False, description="是否循环巡航；当前保留字段")
+    force: bool = Field(default=False, description="是否跳过 readiness blocker 强制开始巡航")
 
 
 class FsmRequest(BaseModel):
-    fsm_state: int
+    fsm_state: int = Field(description="Aurora FSM 状态值，需按厂商 SDK 定义填写")

@@ -29,8 +29,21 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="GR3 Robot Adapter",
-        description="Unitree-compatible HTTP adapter for GR3 HumanoidNav/Aurora.",
+        description=(
+            "GR3 机器人适配服务。外层兼容原 Unitree /slam 与 /audio 接口，"
+            "内部桥接 HumanoidNav ROS2 与 Aurora SDK。默认命名空间为 /GR301AA0025。"
+        ),
         version="0.1.0",
+        openapi_tags=[
+            {
+                "name": "unitree-compatible",
+                "description": "背包优先调用的 Unitree 兼容接口，路径保持 /slam/... 和 /audio/...",
+            },
+            {
+                "name": "gr3-debug",
+                "description": "GR3 内部调试接口，用于检查 readiness、ROS2、Aurora、地图、POI、巡航任务。",
+            },
+        ],
     )
     app.state.config = config
     app.state.robot_service = robot_service
@@ -56,8 +69,9 @@ def create_app() -> FastAPI:
     def on_shutdown() -> None:
         robot_service.stop()
 
-    @app.get("/healthz")
+    @app.get("/healthz", tags=["gr3-debug"], summary="检查适配服务进程是否存活")
     def healthz() -> dict:
+        """只表示 FastAPI 进程活着，不代表 ROS2、HumanoidNav、Aurora 或定位已经 ready。"""
         return {"ok": True, "namespace": config.ns}
 
     @app.get("/", include_in_schema=False)

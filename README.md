@@ -39,3 +39,4 @@ chmod +x scripts/run_adapter.sh
 
 - `docs/GR3适配服务设计.md`
 - `docs/GR3接口文档.md`
+- `docs/GR3逐步调试操作手册.md`
