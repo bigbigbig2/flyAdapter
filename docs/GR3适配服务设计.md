@@ -171,6 +171,11 @@ source /opt/fftai/humanoidnav/install/setup.bash
 
 ```bash
 cd ~/aurora_ws/gr3
+source .venv/bin/activate
+pip install -r requirements.txt
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 export ROBOT_NAMESPACE=GR301AA0025
 ./scripts/run_adapter.sh
 ```

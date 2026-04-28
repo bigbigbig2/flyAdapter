@@ -173,6 +173,7 @@ pip install -r requirements.txt
 
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
+python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 
 export ROBOT_NAMESPACE=GR301AA0025
 export ADAPTER_HOST=0.0.0.0
@@ -204,7 +205,36 @@ ros_python_unavailable
 ros_bridge_not_ready
 ```
 
-优先检查 adapter 启动前有没有 source：
+先看具体错误。如果错误类似：
+
+```plain
+ROS2 Python imports unavailable: No module named 'numpy'
+```
+
+说明 HumanoidNav 底层已经可能起来了，但 adapter 当前 `.venv` 里缺 ROS2 Python 消息依赖需要的 `numpy`。处理方式：
+
+```bash
+cd ~/aurora_ws/gr3
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c "import numpy; print(numpy.__version__)"
+```
+
+如果机器人现场没有外网，优先使用系统包并让虚拟环境能看到系统 Python 包：
+
+```bash
+sudo apt install python3-numpy
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
+```
+
+然后重启 adapter。
+
+如果不是 `numpy`，再优先检查 adapter 启动前有没有 source：
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -261,6 +291,58 @@ curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
   -d '{"map_path":"/opt/fftai/nav/map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
 ```
+
+---
+
+## 6.1 你当前这种输出怎么判断
+
+如果你看到类似下面的组合：
+
+```plain
+/robot/status 里 ros.available=false
+last_error="ROS2 Python imports unavailable: No module named 'numpy'"
+
+ros2 service list 能看到 /GR301AA0025/slam/load_map
+ros2 action list 能看到 /GR301AA0025/navigate_to_pose
+ros2 topic echo /GR301AA0025/robot_pose 有数据
+ros2 topic echo /GR301AA0025/odom_status_code 显示 data: 1
+```
+
+结论是：
+
+- HumanoidNav 底层服务已经起来了。
+- namespace `GR301AA0025` 是对的。
+- Adapter 没接上 ROS2，不是因为 ROS2 不通，而是因为 adapter 的 Python 虚拟环境缺 `numpy`。
+- `odom_status_code=data: 1` 表示定位还在 `INITIALIZING`，还不是 `GOOD`。修好 adapter 后，readiness 仍会等到 code 变为 `2` 才允许正常导航。
+
+处理顺序：
+
+```bash
+cd ~/aurora_ws/gr3
+source .venv/bin/activate
+pip install -r requirements.txt
+python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
+
+# 停掉旧 adapter 后重启
+export ROBOT_NAMESPACE=GR301AA0025
+./scripts/run_adapter.sh
+```
+
+重启后再测：
+
+```bash
+curl http://127.0.0.1:8080/robot/status
+curl http://127.0.0.1:8080/robot/readiness
+```
+
+这时 `/robot/status` 里应该至少变成：
+
+```plain
+ros.available=true
+ros.ready=true
+```
+
+如果 `odom_status_code` 还是 `1`，继续做地图加载、初始位姿和定位质量排查。
 
 ---
 
@@ -417,6 +499,74 @@ Web 页面用于现场快速观察：
 - 当前地图、定位状态、巡航状态。
 - SSE 事件流。
 - 保存点位、加载地图、单点导航、巡航。
+
+---
+
+## 12.1 RViz 看不到 map / TF 的排查
+
+如果 RViz 反复打印：
+
+```plain
+无法获取变换: "map" passed to lookupTransform argument target_frame does not exist
+Message Filter dropping message: frame 'odom' ...
+```
+
+先按下面顺序判断。
+
+第一，确认 TF 话题在 namespace 下有数据：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+
+timeout 5s ros2 topic echo /GR301AA0025/tf --once
+timeout 5s ros2 topic echo /GR301AA0025/tf_static --once
+```
+
+第二，用带绝对 topic remap 的 `tf2_echo` 看 `map -> odom` 是否存在：
+
+```bash
+ros2 run tf2_ros tf2_echo map odom \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static
+```
+
+如果这里一直查不到 `map -> odom`，说明定位链路还没建立，不是 RViz 页面问题。继续检查：
+
+```bash
+timeout 5s ros2 topic echo /GR301AA0025/odom_status_code --once
+timeout 5s ros2 topic echo /GR301AA0025/slam/mode_status --once
+```
+
+`odom_status_code=1` 是 `INITIALIZING`，RViz 可能还拿不到完整 TF。需要先 `load_map`，必要时设置初始位姿，直到 `odom_status_code=2`。
+
+第三，启动 RViz 时使用绝对 remap：
+
+```bash
+rviz2 -d ~/aurora_ws/navigation_view_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static
+```
+
+打开后 Fixed Frame 仍然用：
+
+```plain
+map
+```
+
+不是 `/GR301AA0025/map`。namespace 是 topic 名称前缀，TF frame 名通常还是 `map`、`odom`、`base_link`、`lidar_link`。
+
+这里保留现场已经验证过的 RViz 写法 `tf:=...` 和 `tf_static:=...`。如果 RViz 仍然提示 `map` frame 不存在，优先排查定位链路是否已经建立 `map -> odom`，不要先改 RViz 启动命令。
+
+RViz 里的 GLSL 报错：
+
+```plain
+active samplers with a different type refer to the same texture image unit
+```
+
+通常是显卡/OpenGL 驱动和 RViz 地图显示相关的渲染警告。它不是本次链路的主因，主因还是 TF 里暂时没有可用的 `map` frame 或 RViz 没订阅到 namespace 下的 `/tf`。
 
 ---
 
