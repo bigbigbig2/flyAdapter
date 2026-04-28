@@ -375,14 +375,110 @@ curl http://127.0.0.1:8080/robot/aurora/state
 curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
 ```
 
-如果 Aurora SDK 当前还没接上，但你想先调 HTTP 页面，可以临时：
+如果返回类似：
+
+```json
+{
+  "connected": false,
+  "mock": false,
+  "fsm_state": null,
+  "standing": false,
+  "error": "cannot import AuroraClient: No module named 'fftai_aurora_sdk'"
+}
+```
+
+结论是：AuroraCore 进程是否启动还不是关键点，当前 adapter 的 Python 环境里没有 Aurora SDK 包。  
+也就是说，`sudo docker start fourier_aurora_server` 只是把 AuroraCore 服务跑起来了，不等于 `~/aurora_ws/gr3/.venv` 里能 `import AuroraClient`。
+
+先在 adapter 环境里查 SDK 是否存在：
+
+```bash
+cd ~/aurora_ws/gr3
+source .venv/bin/activate
+
+python -c "import importlib.util; print('aurora_sdk', importlib.util.find_spec('aurora_sdk')); print('aurora', importlib.util.find_spec('aurora')); print('fftai_aurora_sdk', importlib.util.find_spec('fftai_aurora_sdk'))"
+```
+
+如果三个都是 `None`，说明 SDK 没装进当前 Python 环境。接入有三种方式。
+
+也可以确认容器里是否有 SDK：
+
+```bash
+sudo docker exec -it fourier_aurora_server bash
+python3 -c "import importlib.util; print('aurora_sdk', importlib.util.find_spec('aurora_sdk')); print('aurora', importlib.util.find_spec('aurora')); print('fftai_aurora_sdk', importlib.util.find_spec('fftai_aurora_sdk'))"
+```
+
+如果宿主机是 `None`，容器里能找到，说明 SDK 只装在容器环境里。
+
+### 8.1 临时先调 HTTP / ROS
+
+如果当前目标只是调背包 HTTP、地图、定位、导航，可以先保持：
+
+```bash
+export REQUIRE_AURORA=0
+```
+
+这种情况下 `/robot/readiness` 会把 `aurora_unavailable` 放在 warnings，不会因为 Aurora SDK 缺失直接阻塞导航。
+
+如果只是想测试 Web 页面的 Aurora 按钮响应，可以临时 mock：
 
 ```bash
 export AURORA_MOCK=1
 ./scripts/run_adapter.sh
 ```
 
-真机正式联调不建议长期使用 mock。
+真机正式联调不要长期使用 mock。
+
+### 8.2 正式接入 Aurora SDK
+
+正式要让 `/robot/aurora/state`、`/robot/aurora/ensure_stand` 可用，需要让 adapter 所在 Python 环境能 import 厂商 SDK。
+
+如果厂商 SDK 是 pip 包：
+
+```bash
+cd ~/aurora_ws/gr3
+source .venv/bin/activate
+pip install <厂商提供的 Aurora SDK whl 或包名>
+python -c "from fftai_aurora_sdk import AuroraClient; print(AuroraClient)"
+```
+
+如果 SDK 在某个本地目录，不在 `.venv` 里：
+
+```bash
+export AURORA_SDK_PATH=/path/to/aurora/python
+export AURORA_CLIENT_MODULE=fftai_aurora_sdk
+export AURORA_CLIENT_CLASS=AuroraClient
+./scripts/run_adapter.sh
+```
+
+也可以按实际模块名改成：
+
+```bash
+export AURORA_CLIENT_MODULE=aurora_sdk
+export AURORA_CLIENT_CLASS=AuroraClient
+```
+
+重启 adapter 后再看：
+
+```bash
+curl http://127.0.0.1:8080/robot/aurora/state
+```
+
+预期至少看到：
+
+```plain
+connected=true
+fsm_state=1/2/3/...
+```
+
+### 8.3 如果 SDK 只在 Docker 容器里
+
+如果 Aurora SDK 只能在 `fourier_aurora_server` 容器内 import，宿主机上的 adapter 就不能直接 `import fftai_aurora_sdk`。这时有两个选择：
+
+- 把 adapter 也放到同一个 SDK 可用的环境里跑。
+- 让厂商提供宿主机可安装的 Python SDK wheel/目录，再用上面的 `pip install` 或 `AURORA_SDK_PATH` 接入。
+
+当前工程不会默认 `docker exec` 去调用 Aurora，因为不同版本 SDK 的 Python API、容器路径、权限策略都可能不一样。先把 SDK 的真实模块名和安装位置确认出来，再接最稳。
 
 ---
 

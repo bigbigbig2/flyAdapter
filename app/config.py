@@ -34,6 +34,9 @@ class AppConfig:
     require_aurora: bool
     aurora_mock: bool
     aurora_robot_name: str
+    aurora_sdk_path: str
+    aurora_client_module: str
+    aurora_client_class: str
     nav_goal_timeout_sec: float
 
     @property
@@ -68,5 +71,8 @@ def load_config() -> AppConfig:
         require_aurora=_bool_env("REQUIRE_AURORA", False),
         aurora_mock=_bool_env("AURORA_MOCK", False),
         aurora_robot_name=os.getenv("AURORA_ROBOT_NAME", "gr3v233"),
+        aurora_sdk_path=os.getenv("AURORA_SDK_PATH", ""),
+        aurora_client_module=os.getenv("AURORA_CLIENT_MODULE", ""),
+        aurora_client_class=os.getenv("AURORA_CLIENT_CLASS", "AuroraClient"),
         nav_goal_timeout_sec=float(os.getenv("NAV_GOAL_TIMEOUT_SEC", "300")),
     )

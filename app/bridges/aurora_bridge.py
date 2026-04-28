@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from app.config import AppConfig
@@ -17,12 +18,15 @@ class AuroraBridge:
         self.config = config
         self._client: Any | None = None
         self._error: str | None = None
+        self._import_attempts: list[str] = []
         self._mock_fsm_state = 2
 
     def start(self) -> None:
         if self.config.aurora_mock:
             return
         try:
+            if self.config.aurora_sdk_path and self.config.aurora_sdk_path not in sys.path:
+                sys.path.insert(0, self.config.aurora_sdk_path)
             client_cls = self._import_client()
             if hasattr(client_cls, "get_instance"):
                 self._client = client_cls.get_instance(self.config.aurora_robot_name)
@@ -52,15 +56,19 @@ class AuroraBridge:
             return {
                 "connected": False,
                 "mock": False,
+                "backend": "python-sdk",
                 "fsm_state": None,
                 "standing": False,
                 "error": self._error or "Aurora SDK unavailable",
+                "sdk_path": self.config.aurora_sdk_path or None,
+                "import_attempts": self._import_attempts,
             }
         try:
             fsm_state = self._get_fsm_state()
             return {
                 "connected": True,
                 "mock": False,
+                "backend": "python-sdk",
                 "fsm_state": fsm_state,
                 "standing": fsm_state in {1, 2, 3},
             }
@@ -68,9 +76,12 @@ class AuroraBridge:
             return {
                 "connected": False,
                 "mock": False,
+                "backend": "python-sdk",
                 "fsm_state": None,
                 "standing": False,
                 "error": str(exc),
+                "sdk_path": self.config.aurora_sdk_path or None,
+                "import_attempts": self._import_attempts,
             }
 
     def set_fsm(self, fsm_state: int) -> dict[str, Any]:
@@ -121,18 +132,26 @@ class AuroraBridge:
                 return int(getattr(self._client, method_name)())
         return None
 
-    @staticmethod
-    def _import_client() -> Any:
+    def _import_client(self) -> Any:
         candidates = [
             ("aurora_sdk", "AuroraClient"),
             ("aurora", "AuroraClient"),
             ("fftai_aurora_sdk", "AuroraClient"),
         ]
-        last_error: Exception | None = None
+        if self.config.aurora_client_module:
+            candidates.insert(
+                0,
+                (self.config.aurora_client_module, self.config.aurora_client_class or "AuroraClient"),
+            )
+
+        errors: list[str] = []
         for module_name, class_name in candidates:
             try:
                 module = __import__(module_name, fromlist=[class_name])
+                self._import_attempts.append(f"{module_name}.{class_name}: ok")
                 return getattr(module, class_name)
             except Exception as exc:  # pragma: no cover - depends on robot SDK
-                last_error = exc
-        raise RuntimeError(f"cannot import AuroraClient: {last_error}")
+                message = f"{module_name}.{class_name}: {exc}"
+                errors.append(message)
+                self._import_attempts.append(message)
+        raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(errors))
