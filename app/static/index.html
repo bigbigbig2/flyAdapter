@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GR3 Adapter Debug</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>GR3 Adapter Debug</h1>
+      <p>Unitree-compatible SLAM API on GR301AA0025</p>
+    </div>
+    <div class="status-strip">
+      <span id="adapterDot" class="dot"></span>
+      <span id="adapterText">checking</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="band">
+      <div class="band-head">
+        <h2>Status</h2>
+        <button id="refreshBtn" class="btn">Refresh</button>
+      </div>
+      <div class="metrics">
+        <div><span>Namespace</span><strong id="namespace">-</strong></div>
+        <div><span>Map</span><strong id="currentMap">-</strong></div>
+        <div><span>SLAM</span><strong id="slamMode">-</strong></div>
+        <div><span>Localization</span><strong id="localization">-</strong></div>
+        <div><span>Aurora</span><strong id="aurora">-</strong></div>
+        <div><span>Cruise</span><strong id="cruise">-</strong></div>
+      </div>
+      <pre id="readiness" class="console"></pre>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Map / Localization</h2>
+        <label>Map path</label>
+        <input id="mapPath" value="/opt/fftai/nav/map" />
+        <div class="split">
+          <label>X<input id="initX" type="number" value="0" step="0.1" /></label>
+          <label>Y<input id="initY" type="number" value="0" step="0.1" /></label>
+          <label>Yaw<input id="initYaw" type="number" value="0" step="0.1" /></label>
+        </div>
+        <div class="actions">
+          <button id="loadMapBtn" class="btn primary">Load Map</button>
+          <button id="startMappingBtn" class="btn">Start Mapping</button>
+          <button id="stopMappingBtn" class="btn">Stop Mapping</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Navigation</h2>
+        <label>Point name</label>
+        <input id="pointName" placeholder="front_desk" />
+        <div class="actions">
+          <button id="savePointBtn" class="btn">Save Current</button>
+          <button id="startCruiseBtn" class="btn primary">Start Cruise</button>
+          <button id="pauseBtn" class="btn">Pause</button>
+          <button id="resumeBtn" class="btn">Resume</button>
+          <button id="stopCruiseBtn" class="btn danger">Stop</button>
+        </div>
+        <h3>Goto Pose</h3>
+        <div class="split">
+          <label>X<input id="gotoX" type="number" value="0" step="0.1" /></label>
+          <label>Y<input id="gotoY" type="number" value="0" step="0.1" /></label>
+          <label>Yaw<input id="gotoYaw" type="number" value="0" step="0.1" /></label>
+        </div>
+        <button id="gotoBtn" class="btn primary">Go</button>
+      </div>
+
+      <div class="panel">
+        <h2>Aurora</h2>
+        <div class="actions">
+          <button id="standBtn" class="btn primary">Ensure Stand</button>
+          <button id="stopMotionBtn" class="btn danger">Stop Motion</button>
+        </div>
+        <pre id="auroraState" class="console compact"></pre>
+      </div>
+
+      <div class="panel">
+        <h2>Navigation Points</h2>
+        <button id="reloadPointsBtn" class="btn">Reload Points</button>
+        <div id="pointsList" class="list"></div>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="band-head">
+        <h2>Events</h2>
+        <button id="connectEventsBtn" class="btn">Connect SSE</button>
+      </div>
+      <pre id="eventsLog" class="console events"></pre>
+    </section>
+
+    <section class="band">
+      <h2>Last Response</h2>
+      <pre id="lastResponse" class="console"></pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
