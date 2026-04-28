@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from typing import Any
 
@@ -19,10 +21,15 @@ class AuroraBridge:
         self._client: Any | None = None
         self._error: str | None = None
         self._import_attempts: list[str] = []
+        self._backend = config.aurora_backend or "docker"
         self._mock_fsm_state = 2
 
     def start(self) -> None:
         if self.config.aurora_mock:
+            return
+        if self._backend in {"docker", "container"}:
+            self._client = None
+            self._error = None
             return
         try:
             if self.config.aurora_sdk_path and self.config.aurora_sdk_path not in sys.path:
@@ -49,8 +56,32 @@ class AuroraBridge:
             return {
                 "connected": True,
                 "mock": True,
+                "backend": "mock",
                 "fsm_state": self._mock_fsm_state,
                 "standing": self._mock_fsm_state in {1, 2, 3},
+            }
+        if self._backend in {"docker", "container"}:
+            result = self._docker_call("get_fsm")
+            if result.get("success"):
+                fsm_state = self._as_int(result.get("fsm_state"))
+                return {
+                    "connected": True,
+                    "mock": False,
+                    "backend": "docker",
+                    "container": self.config.aurora_container_name,
+                    "fsm_state": fsm_state,
+                    "standing": fsm_state in {1, 2, 3},
+                    "raw": result,
+                }
+            return {
+                "connected": False,
+                "mock": False,
+                "backend": "docker",
+                "container": self.config.aurora_container_name,
+                "fsm_state": None,
+                "standing": False,
+                "error": result.get("error") or "Aurora docker backend unavailable",
+                "raw": result,
             }
         if self._client is None:
             return {
@@ -88,6 +119,11 @@ class AuroraBridge:
         if self.config.aurora_mock:
             self._mock_fsm_state = int(fsm_state)
             return {"success": True, "fsm_state": self._mock_fsm_state, "mock": True}
+        if self._backend in {"docker", "container"}:
+            result = self._docker_call("set_fsm", str(int(fsm_state)))
+            if result.get("success"):
+                return {"success": True, "fsm_state": int(fsm_state), "backend": "docker", "raw": result}
+            return {"success": False, "message": result.get("error") or "set_fsm failed", "backend": "docker", "raw": result}
         if self._client is None:
             return {"success": False, "message": self._error or "Aurora SDK unavailable"}
         try:
@@ -113,6 +149,11 @@ class AuroraBridge:
     def stop_motion(self) -> dict[str, Any]:
         if self.config.aurora_mock:
             return {"success": True, "message": "mock stop_motion"}
+        if self._backend in {"docker", "container"}:
+            result = self._docker_call("stop_motion")
+            if result.get("success"):
+                return {"success": True, "message": result.get("message", "stop_motion"), "backend": "docker", "raw": result}
+            return {"success": False, "message": result.get("error") or "stop_motion failed", "backend": "docker", "raw": result}
         if self._client is None:
             return {"success": False, "message": self._error or "Aurora SDK unavailable"}
         try:
@@ -155,3 +196,141 @@ class AuroraBridge:
                 errors.append(message)
                 self._import_attempts.append(message)
         raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(errors))
+
+    def _docker_call(self, operation: str, value: str = "") -> dict[str, Any]:
+        script = self._container_script()
+        command = [
+            "docker",
+            "exec",
+            "-w",
+            self.config.aurora_container_workdir,
+            self.config.aurora_container_name,
+            self.config.aurora_container_python,
+            "-c",
+            script,
+            self.config.aurora_robot_name,
+            operation,
+            value,
+            self.config.aurora_client_module,
+            self.config.aurora_client_class or "AuroraClient",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=self.config.aurora_docker_timeout_sec,
+            )
+        except FileNotFoundError:
+            return {"success": False, "error": "docker command not found"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": f"docker exec timeout after {self.config.aurora_docker_timeout_sec}s"}
+        except Exception as exc:  # pragma: no cover - depends on host docker setup
+            return {"success": False, "error": str(exc)}
+
+        parsed = self._parse_json_line(completed.stdout)
+        if parsed is not None:
+            parsed["returncode"] = completed.returncode
+            if completed.stderr.strip():
+                parsed["stderr"] = completed.stderr.strip()
+            return parsed
+        return {
+            "success": False,
+            "returncode": completed.returncode,
+            "error": completed.stderr.strip() or completed.stdout.strip() or "docker exec returned no JSON",
+            "stdout": completed.stdout.strip(),
+        }
+
+    @staticmethod
+    def _parse_json_line(output: str) -> dict[str, Any] | None:
+        for line in reversed(output.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                return data
+        return None
+
+    @staticmethod
+    def _as_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _container_script() -> str:
+        return r'''
+import importlib
+import json
+import sys
+import traceback
+
+robot_name = sys.argv[1]
+operation = sys.argv[2]
+value = sys.argv[3] if len(sys.argv) > 3 else ""
+module_override = sys.argv[4] if len(sys.argv) > 4 else ""
+class_name = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else "AuroraClient"
+
+def emit(payload):
+    print(json.dumps(payload, ensure_ascii=False))
+
+def call_first(obj, names, *args):
+    tried = []
+    for name in names:
+        tried.append(name)
+        method = getattr(obj, name, None)
+        if method is None:
+            continue
+        return method(*args), name
+    raise RuntimeError("no supported method, tried: " + ",".join(tried))
+
+candidates = []
+if module_override:
+    candidates.append((module_override, class_name))
+candidates.extend([
+    ("aurora_sdk", "AuroraClient"),
+    ("aurora", "AuroraClient"),
+    ("fftai_aurora_sdk", "AuroraClient"),
+])
+
+attempts = []
+try:
+    client_cls = None
+    for module_name, cls_name in candidates:
+        try:
+            module = importlib.import_module(module_name)
+            client_cls = getattr(module, cls_name)
+            attempts.append(f"{module_name}.{cls_name}: ok")
+            break
+        except Exception as exc:
+            attempts.append(f"{module_name}.{cls_name}: {exc}")
+    if client_cls is None:
+        raise RuntimeError("cannot import AuroraClient from candidates: " + "; ".join(attempts))
+
+    if hasattr(client_cls, "get_instance"):
+        client = client_cls.get_instance(robot_name)
+    else:
+        client = client_cls()
+
+    if operation == "get_fsm":
+        result, method = call_first(client, ["get_fsm_state", "GetFsmState", "getFsmState", "get_fsm"])
+        emit({"success": True, "operation": operation, "fsm_state": result, "method": method, "import_attempts": attempts})
+    elif operation == "set_fsm":
+        result, method = call_first(client, ["set_fsm_state", "SetFsmState", "setFsmState", "set_fsm"], int(value))
+        emit({"success": True, "operation": operation, "fsm_state": int(value), "method": method, "result": str(result), "import_attempts": attempts})
+    elif operation == "stop_motion":
+        result, method = call_first(client, ["stop_motion", "StopMotion", "stop", "Stop"])
+        emit({"success": True, "operation": operation, "method": method, "message": str(result), "import_attempts": attempts})
+    else:
+        raise RuntimeError("unknown operation: " + operation)
+except Exception as exc:
+    emit({"success": False, "operation": operation, "error": str(exc), "traceback": traceback.format_exc(), "import_attempts": attempts})
+'''

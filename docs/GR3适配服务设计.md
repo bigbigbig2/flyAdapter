@@ -97,7 +97,14 @@ GR3 是人形机器人，适配层必须在导航前做安全检查：
 7. Aurora 是否连接。
 8. 机器人是否站立。
 
-默认 `REQUIRE_AURORA=0`，便于没有 Aurora SDK 的情况下先调 HTTP 和 ROS；真机安全部署时建议改成：
+Aurora SDK 按现场文档默认走容器后端：
+
+```bash
+export AURORA_BACKEND=docker
+export AURORA_CONTAINER_NAME=fourier_aurora_server
+```
+
+默认 `REQUIRE_AURORA=0`，便于 Aurora 容器权限或 SDK 模块名还没确认时先调 HTTP 和 ROS；真机安全部署时建议在 Aurora 后端连通后改成：
 
 ```bash
 export REQUIRE_AURORA=1

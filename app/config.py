@@ -34,6 +34,11 @@ class AppConfig:
     require_aurora: bool
     aurora_mock: bool
     aurora_robot_name: str
+    aurora_backend: str
+    aurora_container_name: str
+    aurora_container_workdir: str
+    aurora_container_python: str
+    aurora_docker_timeout_sec: float
     aurora_sdk_path: str
     aurora_client_module: str
     aurora_client_class: str
@@ -71,6 +76,11 @@ def load_config() -> AppConfig:
         require_aurora=_bool_env("REQUIRE_AURORA", False),
         aurora_mock=_bool_env("AURORA_MOCK", False),
         aurora_robot_name=os.getenv("AURORA_ROBOT_NAME", "gr3v233"),
+        aurora_backend=os.getenv("AURORA_BACKEND", "docker").strip().lower(),
+        aurora_container_name=os.getenv("AURORA_CONTAINER_NAME", "fourier_aurora_server"),
+        aurora_container_workdir=os.getenv("AURORA_CONTAINER_WORKDIR", "/workspace"),
+        aurora_container_python=os.getenv("AURORA_CONTAINER_PYTHON", "python3"),
+        aurora_docker_timeout_sec=float(os.getenv("AURORA_DOCKER_TIMEOUT_SEC", "5")),
         aurora_sdk_path=os.getenv("AURORA_SDK_PATH", ""),
         aurora_client_module=os.getenv("AURORA_CLIENT_MODULE", ""),
         aurora_client_class=os.getenv("AURORA_CLIENT_CLASS", "AuroraClient"),

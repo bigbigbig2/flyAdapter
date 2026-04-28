@@ -21,6 +21,9 @@ source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 
+export AURORA_BACKEND=docker
+export AURORA_CONTAINER_NAME=fourier_aurora_server
+
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh
 ```
