@@ -26,6 +26,7 @@ export AURORA_CONTAINER_NAME=fourier_aurora_server
 export AURORA_DOMAIN_ID=123
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_DOCKER_TIMEOUT_SEC=20
+export AURORA_STATE_CACHE_TTL_SEC=10
 
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh

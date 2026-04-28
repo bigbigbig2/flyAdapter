@@ -1,4 +1,7 @@
 const $ = (id) => document.getElementById(id);
+let refreshing = false;
+let lastPointsLoad = 0;
+let eventSource = null;
 
 async function api(path, options = {}) {
   const opts = {
@@ -16,7 +19,9 @@ async function api(path, options = {}) {
   } catch {
     data = { raw: text };
   }
-  $("lastResponse").textContent = JSON.stringify(data, null, 2);
+  if (options.updateLast !== false) {
+    $("lastResponse").textContent = JSON.stringify(data, null, 2);
+  }
   return data;
 }
 
@@ -26,8 +31,10 @@ function setAdapter(ok, text) {
 }
 
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const status = await api("/robot/status");
+    const status = await api("/robot/status", { updateLast: false });
     setAdapter(true, "online");
     $("namespace").textContent = status.adapter.namespace || "-";
     $("currentMap").textContent = status.runtime.current_map || "-";
@@ -37,10 +44,16 @@ async function refresh() {
     $("cruise").textContent = status.runtime.is_cruising ? `${status.runtime.current_nav_index + 1}/${status.runtime.total_nav_points}` : "idle";
     $("readiness").textContent = JSON.stringify(status.readiness, null, 2);
     $("auroraState").textContent = JSON.stringify(status.aurora, null, 2);
-    await loadPoints(false);
+    const now = Date.now();
+    if (now - lastPointsLoad > 15000) {
+      await loadPoints(false);
+      lastPointsLoad = now;
+    }
   } catch (error) {
     setAdapter(false, "offline");
     $("lastResponse").textContent = String(error);
+  } finally {
+    refreshing = false;
   }
 }
 
@@ -86,13 +99,16 @@ async function gotoPose() {
 
 function connectEvents() {
   const log = $("eventsLog");
-  const source = new EventSource("/slam/events");
+  if (eventSource) {
+    eventSource.close();
+  }
+  eventSource = new EventSource("/slam/events");
   log.textContent += "connected\n";
-  source.onmessage = (event) => {
+  eventSource.onmessage = (event) => {
     log.textContent += event.data + "\n";
     log.scrollTop = log.scrollHeight;
   };
-  source.onerror = () => {
+  eventSource.onerror = () => {
     log.textContent += "event stream error\n";
   };
 }
@@ -113,4 +129,4 @@ $("stopMotionBtn").onclick = () => api("/robot/aurora/stop_motion", { method: "P
 $("connectEventsBtn").onclick = connectEvents;
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, 5000);

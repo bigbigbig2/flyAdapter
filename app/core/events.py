@@ -44,6 +44,9 @@ class EventHub:
         subscriber = self.subscribe()
         try:
             while True:
-                yield await asyncio.to_thread(subscriber.get)
+                try:
+                    yield await asyncio.to_thread(subscriber.get, True, 15.0)
+                except queue.Empty:
+                    yield ": heartbeat\n\n"
         finally:
             self.unsubscribe(subscriber)

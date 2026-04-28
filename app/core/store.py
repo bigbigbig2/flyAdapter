@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ from app.config import AppConfig
 class JsonStore:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._lock = threading.RLock()
         self.config.data_dir.mkdir(parents=True, exist_ok=True)
         self.config.show_cruise_dir.mkdir(parents=True, exist_ok=True)
         self.config.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -43,10 +46,11 @@ class JsonStore:
         self._write_json(self.config.nav_points_file, payload)
 
     def load_show_cruise(self, name: str) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+        safe_name = self._safe_name(name)
         candidates = [
-            self.config.show_cruise_dir / f"{name}.json",
-            self.config.data_dir / f"{name}.json",
-            Path("/home/unitree/testdata") / f"{name}.json",
+            self.config.show_cruise_dir / f"{safe_name}.json",
+            self.config.data_dir / f"{safe_name}.json",
+            Path("/home/unitree/testdata") / f"{safe_name}.json",
         ]
         for candidate in candidates:
             if candidate.exists():
@@ -77,7 +81,13 @@ class JsonStore:
         return maps
 
     def resolve_map_name(self, name: str) -> str:
-        path = self.config.map_root / name
+        safe_name = self._safe_name(name)
+        root = self.config.map_root.resolve()
+        path = (root / safe_name).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"map path escaped MAP_ROOT: {name}") from exc
         if not path.exists():
             raise FileNotFoundError(f"map not found: {name}")
         return str(path)
@@ -88,38 +98,63 @@ class JsonStore:
     def save_routes(self, routes: dict[str, Any]) -> None:
         self._write_json(self.routes_file, routes)
 
-    @staticmethod
-    def _parse_nav_points(data: dict[str, Any]) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    @classmethod
+    def _parse_nav_points(cls, data: dict[str, Any]) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
         points = data.get("navigation_points") or data.get("nav_points") or []
         map_file = data.get("map_file", "")
         initial_pose = data.get("initial_pose") or {}
         normalized: list[dict[str, Any]] = []
         for point in points:
+            if not isinstance(point, dict):
+                continue
             normalized.append(
                 {
                     "name": str(point.get("name", f"point_{len(normalized) + 1}")),
-                    "x": float(point.get("x", point.get("pose", {}).get("x", 0.0))),
-                    "y": float(point.get("y", point.get("pose", {}).get("y", 0.0))),
-                    "z": float(point.get("z", point.get("pose", {}).get("z", 0.0))),
-                    "q_x": float(point.get("q_x", point.get("pose", {}).get("q_x", 0.0))),
-                    "q_y": float(point.get("q_y", point.get("pose", {}).get("q_y", 0.0))),
-                    "q_z": float(point.get("q_z", point.get("pose", {}).get("q_z", 0.0))),
-                    "q_w": float(point.get("q_w", point.get("pose", {}).get("q_w", 1.0))),
+                    "x": cls._float(point.get("x", point.get("pose", {}).get("x", 0.0))),
+                    "y": cls._float(point.get("y", point.get("pose", {}).get("y", 0.0))),
+                    "z": cls._float(point.get("z", point.get("pose", {}).get("z", 0.0))),
+                    "q_x": cls._float(point.get("q_x", point.get("pose", {}).get("q_x", 0.0))),
+                    "q_y": cls._float(point.get("q_y", point.get("pose", {}).get("q_y", 0.0))),
+                    "q_z": cls._float(point.get("q_z", point.get("pose", {}).get("q_z", 0.0))),
+                    "q_w": cls._float(point.get("q_w", point.get("pose", {}).get("q_w", 1.0)), default=1.0),
+                    "map_name": point.get("map_name"),
+                    "frame_id": str(point.get("frame_id", "map")),
+                    "tags": list(point.get("tags", [])) if isinstance(point.get("tags", []), list) else [],
+                    "meta": dict(point.get("meta", {})) if isinstance(point.get("meta", {}), dict) else {},
                 }
             )
         return normalized, map_file, initial_pose
 
-    @staticmethod
-    def _read_json(path: Path, default: Any) -> Any:
-        if not path.exists():
-            return default
-        with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+    def _read_json(self, path: Path, default: Any) -> Any:
+        with self._lock:
+            if not path.exists():
+                return default
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    return json.load(handle)
+            except json.JSONDecodeError:
+                return default
+
+    def _write_json(self, path: Path, data: Any) -> None:
+        with self._lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            tmp.replace(path)
 
     @staticmethod
-    def _write_json(path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-        tmp.replace(path)
+    def _safe_name(name: str) -> str:
+        value = str(name).strip()
+        if not value or value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError(f"invalid name: {name}")
+        return value
+
+    @staticmethod
+    def _float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default

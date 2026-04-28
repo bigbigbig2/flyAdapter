@@ -47,20 +47,37 @@ class RobotService:
         self.ros.stop()
 
     def legacy_status(self) -> dict[str, Any]:
-        status = self.state.legacy_status()
-        status["ready_for_navigation"] = self.readiness()["ready"]
-        status["aurora"] = self.aurora.state()
+        snap = self.state.snapshot()
+        aurora = self.aurora.state()
+        status = {
+            "status": "running",
+            "is_cruising": snap["is_cruising"],
+            "is_paused": snap["is_paused"],
+            "current_nav_index": snap["current_nav_index"] + 1,
+            "total_nav_points": snap["total_nav_points"],
+            "is_arrived": snap["is_arrived"],
+            "map_file": snap["current_map"],
+            "status_code": snap["status_code"],
+            "slam_mode": snap["slam_mode"],
+            "odom_status_code": snap["odom_status_code"],
+            "odom_status_score": snap["odom_status_score"],
+            "localization_status": RuntimeState.localization_status_from_code(snap["odom_status_code"]),
+            "last_error": snap["last_error"],
+        }
+        status["ready_for_navigation"] = self.readiness(snap=snap, aurora=aurora)["ready"]
+        status["aurora"] = aurora
         status["ros"] = self.ros.diagnostics()
         return status
 
     def status(self) -> dict[str, Any]:
         snap = self.state.snapshot()
+        aurora = self.aurora.state()
         return {
             "adapter": {"status": "running", "namespace": self.config.ns},
             "ros": self.ros.diagnostics(),
-            "aurora": self.aurora.state(),
+            "aurora": aurora,
             "runtime": snap,
-            "readiness": self.readiness(),
+            "readiness": self.readiness(snap=snap, aurora=aurora),
         }
 
     def get_pose(self) -> dict[str, Any]:
@@ -78,12 +95,12 @@ class RobotService:
             "odom_status_score": snap["odom_status_score"],
             "odom_status_age_sec": snap["odom_status_age_sec"],
             "health": snap["health"],
-            "ready": self.readiness()["ready"],
+            "ready": self.readiness(snap=snap)["ready"],
         }
 
-    def readiness(self) -> dict[str, Any]:
-        snap = self.state.snapshot()
-        aurora = self.aurora.state()
+    def readiness(self, snap: dict[str, Any] | None = None, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
+        snap = snap or self.state.snapshot()
+        aurora = aurora or self.aurora.state()
         blockers: list[str] = []
         warnings: list[str] = []
 
@@ -114,6 +131,8 @@ class RobotService:
             warnings.append("aurora_unavailable")
         elif not aurora.get("standing"):
             warnings.append("robot_not_standing")
+        if aurora.get("stale"):
+            warnings.append("aurora_state_stale")
 
         return {
             "ready": not blockers,
@@ -128,6 +147,8 @@ class RobotService:
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
                 "aurora_connected": bool(aurora.get("connected")),
                 "robot_standing": bool(aurora.get("standing")),
+                "aurora_cached": bool(aurora.get("cached")),
+                "aurora_stale": bool(aurora.get("stale")),
             },
         }
 
@@ -215,7 +236,11 @@ class RobotService:
         return self.legacy_status()
 
     def load_nav_points_by_name(self, name: str) -> dict[str, Any]:
-        points, map_file, initial_pose = self.store.load_show_cruise(name)
+        try:
+            points, map_file, initial_pose = self.store.load_show_cruise(name)
+        except (FileNotFoundError, ValueError) as exc:
+            self.state.mark_error(str(exc), status_code=404)
+            return {"success": False, "message": str(exc), "status_code": 404}
         self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
         if map_file:
             self.state.current_map = map_file
@@ -313,7 +338,11 @@ class RobotService:
         return {"maps": self.store.list_maps(), "current_map": self.state.snapshot()["current_map"]}
 
     def load_map_by_name(self, map_name: str, x: float, y: float, z: float, yaw: float, wait: bool) -> dict[str, Any]:
-        path = self.store.resolve_map_name(map_name)
+        try:
+            path = self.store.resolve_map_name(map_name)
+        except (FileNotFoundError, ValueError) as exc:
+            self.state.mark_error(str(exc), status_code=404)
+            return {"success": False, "message": str(exc), "status_code": 404}
         return self.relocation(path, x=x, y=y, z=z, yaw=yaw, wait_for_localization=wait)
 
     def save_current_poi(self, name: str, map_name: str | None = None, tags: list[str] | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:

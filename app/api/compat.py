@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Body, File, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -93,7 +94,9 @@ def start_cruise(request: Request, body: dict | None = Body(default=None)) -> di
 @router.post("/slam/start_show_cruise", summary="按名称加载巡航文件并开始巡航")
 def start_show_cruise(request: Request, body: StartShowCruiseRequest) -> dict:
     """兼容展厅演示流程，按 `name` 加载 `{name}.json` 巡航点文件后开始巡航。"""
-    service(request).load_nav_points_by_name(body.name)
+    loaded = service(request).load_nav_points_by_name(body.name)
+    if loaded.get("success") is False:
+        return loaded
     return service(request).start_cruise(force=body.force)
 
 
@@ -179,7 +182,8 @@ def task_events(request: Request, task_id: str) -> StreamingResponse:
 async def play_wav(request: Request, wavfile: UploadFile = File(...)) -> PlainTextResponse:
     """接收 `wavfile` 表单文件并保存到 uploads；当前不直接驱动 GR3 播放。"""
     cfg = request.app.state.config
-    target = cfg.upload_dir / wavfile.filename
+    filename = Path(wavfile.filename or "upload.wav").name
+    target = cfg.upload_dir / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as handle:
         handle.write(await wavfile.read())

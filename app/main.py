@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.compat import router as compat_router
@@ -68,6 +68,14 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     def on_shutdown() -> None:
         robot_service.stop()
+
+    @app.exception_handler(FileNotFoundError)
+    async def not_found_handler(request: Request, exc: FileNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"success": False, "message": str(exc)})
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
 
     @app.get("/healthz", tags=["gr3-debug"], summary="检查适配服务进程是否存活")
     def healthz() -> dict:
