@@ -29,6 +29,13 @@ def normalize_namespace(value: str | None) -> str:
     return value if value.startswith("/") else f"/{value}"
 
 
+def normalize_motion_guard(value: str | None) -> str:
+    value = (value or "none").strip().lower()
+    if value in {"none", "observe", "aurora"}:
+        return value
+    return "none"
+
+
 @dataclass(frozen=True)
 class AppConfig:
     root_dir: Path
@@ -39,6 +46,7 @@ class AppConfig:
     nav_points_file: Path
     show_cruise_dir: Path
     upload_dir: Path
+    motion_guard: str
     require_aurora: bool
     aurora_enabled: bool
     aurora_mock: bool
@@ -75,6 +83,7 @@ def load_config() -> AppConfig:
     nav_points_file = Path(
         os.getenv("NAV_POINTS_FILE", data_dir / "navigation_points.json")
     ).expanduser()
+    motion_guard = normalize_motion_guard(os.getenv("MOTION_GUARD", "none"))
 
     return AppConfig(
         root_dir=root_dir,
@@ -87,8 +96,9 @@ def load_config() -> AppConfig:
             os.getenv("SHOW_CRUISE_DIR", data_dir / "show_cruises")
         ).expanduser(),
         upload_dir=Path(os.getenv("UPLOAD_DIR", data_dir / "uploads")).expanduser(),
+        motion_guard=motion_guard,
         require_aurora=_bool_env("REQUIRE_AURORA", False),
-        aurora_enabled=_bool_env("AURORA_ENABLED", True),
+        aurora_enabled=_bool_env("AURORA_ENABLED", False) or motion_guard in {"aurora", "observe"},
         aurora_mock=_bool_env("AURORA_MOCK", False),
         aurora_backend=os.getenv("AURORA_BACKEND", "agent").strip().lower(),
         aurora_agent_url=os.getenv("AURORA_AGENT_URL", "http://127.0.0.1:18080").rstrip("/"),

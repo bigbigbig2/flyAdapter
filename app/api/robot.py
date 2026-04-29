@@ -27,7 +27,7 @@ def service(request: Request) -> RobotService:
 
 @router.get("/status", summary="查询 GR3 适配服务总状态")
 def status(request: Request) -> dict:
-    """聚合 adapter、ROS bridge、Aurora、runtime、readiness，用于调试总览。"""
+    """聚合 adapter、ROS bridge、可选 Aurora、runtime、workflow readiness，用于调试总览。"""
     return service(request).status()
 
 
@@ -35,6 +35,42 @@ def status(request: Request) -> dict:
 def readiness(request: Request) -> dict:
     """返回当前是否具备导航条件，以及 blockers/warnings 的具体原因。"""
     return service(request).readiness()
+
+
+@router.get("/workflow/status", summary="查询分阶段流程状态")
+def workflow_status(request: Request) -> dict:
+    """分别返回手动建图、手动打点、自动导航三条流程的就绪状态。"""
+    return service(request).workflow_status()
+
+
+@router.get("/readiness/mapping", summary="查询手动建图就绪状态")
+def readiness_mapping(request: Request) -> dict:
+    """手动建图只要求 ROS/HumanoidNav、mapping 模式、位姿和健康状态，不依赖 Aurora。"""
+    return service(request).mapping_readiness()
+
+
+@router.get("/readiness/poi", summary="查询手动打点就绪状态")
+def readiness_poi(request: Request) -> dict:
+    """手动打点要求已加载地图、定位良好、位姿新鲜，不依赖 Aurora。"""
+    return service(request).poi_readiness()
+
+
+@router.get("/readiness/navigation", summary="查询自动导航就绪状态")
+def readiness_navigation(request: Request) -> dict:
+    """自动导航预检；只有 MOTION_GUARD=aurora 或 REQUIRE_AURORA=1 时才把 Aurora 作为前置条件。"""
+    return service(request).readiness()
+
+
+@router.get("/motion/authority", summary="查询运动控制权策略")
+def motion_authority(request: Request) -> dict:
+    """说明当前运动控制策略：手动建图/打点由遥控器控制，自动导航由 Nav2 goal 控制。"""
+    return service(request).motion_authority()
+
+
+@router.post("/motion/safety_stop", summary="按当前运动策略执行安全停止")
+def motion_safety_stop(request: Request) -> dict:
+    """取消当前导航；默认不碰遥控器运动链路，MOTION_GUARD=aurora 时才补充 Aurora stop_motion。"""
+    return service(request).cancel_navigation()
 
 
 @router.post("/navigation/precheck", summary="执行导航前预检")
@@ -126,10 +162,8 @@ def goto_poi(request: Request, body: GotoPoiRequest) -> dict:
 
 @router.post("/navigation/cancel", summary="取消当前导航")
 def navigation_cancel(request: Request) -> dict:
-    """调用 `/cancel_current_action` 并用 Aurora stop_motion 兜底停止。"""
-    result = service(request)._safe_ros_call(lambda: service(request).ros.cancel_current_action(), "cancel")
-    service(request).aurora.stop_motion()
-    return {"result": result, "status": service(request).legacy_status()}
+    """取消 Nav2 当前 goal；只有运动策略要求 Aurora 时才调用 stop_motion。"""
+    return service(request).cancel_navigation()
 
 
 @router.get("/navigation/task", summary="查询适配层导航任务")

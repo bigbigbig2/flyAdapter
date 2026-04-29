@@ -29,7 +29,7 @@
         <strong id="rosStatus">-</strong>
       </div>
       <div class="metric">
-        <span>Aurora</span>
+        <span>运动策略 / Aurora</span>
         <strong id="auroraStatus">-</strong>
       </div>
       <div class="metric">
@@ -99,20 +99,20 @@
           <div class="panel-head">
             <div>
               <h2>启动检查</h2>
-              <p>确认 Adapter、ROS、Aurora 和机器人站立状态。</p>
+              <p>确认 Adapter 和 ROS；Aurora 只在运动策略配置为 aurora 时作为自动导航保护项。</p>
             </div>
             <button id="runAcceptanceTopBtn" class="btn primary">运行验收检查</button>
           </div>
           <div class="status-grid">
             <div class="status-box"><span>Adapter</span><strong id="checkAdapter">-</strong></div>
             <div class="status-box"><span>ROS Bridge</span><strong id="checkRos">-</strong></div>
-            <div class="status-box"><span>Aurora</span><strong id="checkAurora">-</strong></div>
-            <div class="status-box"><span>机体</span><strong id="checkBody">-</strong></div>
+            <div class="status-box"><span>Aurora 策略</span><strong id="checkAurora">-</strong></div>
+            <div class="status-box"><span>运动控制权</span><strong id="checkBody">-</strong></div>
           </div>
           <div class="actions">
-            <button id="ensureStandBtn" class="btn primary">确保站立</button>
-            <button id="stopMotionBtn" class="btn danger">停止运动</button>
-            <button id="auroraResetBtn" class="btn">重置 Aurora</button>
+            <button id="ensureStandBtn" class="btn primary">可选：Aurora 站立</button>
+            <button id="stopMotionBtn" class="btn danger">可选：Aurora 停止</button>
+            <button id="auroraResetBtn" class="btn">可选：重置 Aurora</button>
           </div>
           <pre id="readinessBox" class="console"></pre>
         </section>

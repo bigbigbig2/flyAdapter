@@ -51,7 +51,9 @@ class RobotService:
         snap = self.state.snapshot()
         aurora = self.aurora.state()
         navigation_readiness = self.readiness(snap=snap, aurora=aurora)
-        mapping_readiness = self.mapping_readiness(snap=snap, aurora=aurora)
+        mapping_readiness = self.mapping_readiness(snap=snap)
+        poi_readiness = self.poi_readiness(snap=snap)
+        motion_authority = self.motion_authority(aurora=aurora)
         status = {
             "status": "running",
             "is_cruising": snap["is_cruising"],
@@ -68,8 +70,11 @@ class RobotService:
             "last_error": snap["last_error"],
         }
         status["ready_for_mapping"] = mapping_readiness["ready"]
+        status["ready_for_poi"] = poi_readiness["ready"]
         status["ready_for_navigation"] = navigation_readiness["ready"]
         status["mapping_readiness"] = mapping_readiness
+        status["poi_readiness"] = poi_readiness
+        status["motion_authority"] = motion_authority
         status["aurora"] = aurora
         status["ros"] = self.ros.diagnostics()
         return status
@@ -77,13 +82,26 @@ class RobotService:
     def status(self) -> dict[str, Any]:
         snap = self.state.snapshot()
         aurora = self.aurora.state()
+        mapping_readiness = self.mapping_readiness(snap=snap)
+        poi_readiness = self.poi_readiness(snap=snap)
+        navigation_readiness = self.readiness(snap=snap, aurora=aurora)
+        motion_authority = self.motion_authority(aurora=aurora)
         return {
             "adapter": {"status": "running", "namespace": self.config.ns},
             "ros": self.ros.diagnostics(),
             "aurora": aurora,
             "runtime": snap,
-            "readiness": self.readiness(snap=snap, aurora=aurora),
-            "mapping_readiness": self.mapping_readiness(snap=snap, aurora=aurora),
+            "motion_authority": motion_authority,
+            "workflow": {
+                "manual_mapping": mapping_readiness,
+                "manual_poi": poi_readiness,
+                "auto_navigation": navigation_readiness,
+                "motion_authority": motion_authority,
+            },
+            "readiness": navigation_readiness,
+            "navigation_readiness": navigation_readiness,
+            "mapping_readiness": mapping_readiness,
+            "poi_readiness": poi_readiness,
         }
 
     def get_pose(self) -> dict[str, Any]:
@@ -91,6 +109,8 @@ class RobotService:
 
     def localization_status(self) -> dict[str, Any]:
         snap = self.state.snapshot()
+        poi_readiness = self.poi_readiness(snap=snap)
+        navigation_readiness = self.readiness(snap=snap)
         return {
             "current_map": snap["current_map"],
             "slam_mode": snap["slam_mode"],
@@ -102,7 +122,63 @@ class RobotService:
             "odom_status_age_sec": snap["odom_status_age_sec"],
             "health": snap["health"],
             "mapping_readiness": self.mapping_readiness(snap=snap),
-            "ready": self.readiness(snap=snap)["ready"],
+            "poi_readiness": poi_readiness,
+            "navigation_readiness": navigation_readiness,
+            "ready": poi_readiness["ready"],
+        }
+
+    def workflow_status(self) -> dict[str, Any]:
+        snap = self.state.snapshot()
+        aurora = self.aurora.state()
+        mapping_readiness = self.mapping_readiness(snap=snap)
+        poi_readiness = self.poi_readiness(snap=snap)
+        navigation_readiness = self.readiness(snap=snap, aurora=aurora)
+        motion_authority = self.motion_authority(aurora=aurora)
+        return {
+            "namespace": self.config.ns,
+            "ros": self.ros.diagnostics(),
+            "aurora": aurora,
+            "motion_authority": motion_authority,
+            "manual_mapping": mapping_readiness,
+            "manual_poi": poi_readiness,
+            "auto_navigation": navigation_readiness,
+        }
+
+    def motion_authority(self, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
+        aurora = aurora if aurora is not None else self.aurora.state()
+        raw = aurora.get("raw") if isinstance(aurora.get("raw"), dict) else {}
+        raw_value = raw.get("value") if isinstance(raw.get("value"), dict) else {}
+        velocity_source = raw_value.get("velocity_source")
+        velocity_source_name = raw_value.get("velocity_source_name") or aurora.get("velocity_source_name")
+        authority = "unknown"
+        if isinstance(velocity_source_name, str):
+            source = velocity_source_name.strip().lower()
+            if "joystick" in source or "remote" in source:
+                authority = "manual_joystick"
+            elif "navigation" in source or source == "nav":
+                authority = "navigation"
+            elif source:
+                authority = source
+        elif self._motion_policy() == "none":
+            authority = "external_manual_or_nav2"
+        elif self._motion_policy() == "observe":
+            authority = "observed_external"
+        elif self._motion_policy() == "aurora":
+            authority = "aurora_guarded_navigation"
+
+        return {
+            "policy": self._motion_policy(),
+            "aurora_required": self._motion_guard_requires_aurora(),
+            "aurora_observed": self._motion_guard_observes_aurora(),
+            "aurora_connected": bool(aurora.get("connected")),
+            "aurora_backend": aurora.get("backend"),
+            "velocity_source": velocity_source,
+            "velocity_source_name": velocity_source_name,
+            "authority": authority,
+            "manual_mapping_motion": "remote_or_joystick",
+            "manual_poi_motion": "remote_or_joystick",
+            "auto_navigation_motion": "nav2_goal",
+            "aurora_commands_enabled": self._motion_guard_requires_aurora(),
         }
 
     def readiness(self, snap: dict[str, Any] | None = None, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -132,19 +208,22 @@ class RobotService:
         aurora_connected = bool(aurora.get("connected"))
         aurora_standing = bool(aurora.get("standing"))
         aurora_standing_known = bool(aurora.get("standing_known", "standing" in aurora))
-        if self.config.require_aurora:
+        aurora_required = self._motion_guard_requires_aurora()
+        aurora_observed = self._motion_guard_observes_aurora()
+        if aurora_required:
             if not aurora_connected:
                 blockers.append("aurora_unavailable")
             elif aurora_standing_known and not aurora_standing:
                 blockers.append("robot_not_standing")
             elif not aurora_standing_known:
                 warnings.append("aurora_standing_unknown")
-        elif not aurora_connected:
-            warnings.append("aurora_unavailable")
-        elif aurora_standing_known and not aurora_standing:
-            warnings.append("robot_not_standing")
-        elif not aurora_standing_known:
-            warnings.append("aurora_standing_unknown")
+        elif aurora_observed:
+            if not aurora_connected:
+                warnings.append("aurora_unavailable")
+            elif aurora_standing_known and not aurora_standing:
+                warnings.append("robot_not_standing")
+            elif not aurora_standing_known:
+                warnings.append("aurora_standing_unknown")
         return {
             "ready": not blockers,
             "blockers": blockers,
@@ -156,6 +235,9 @@ class RobotService:
                 "localization_good": snap["odom_status_code"] == 2,
                 "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
+                "motion_guard": self._motion_policy(),
+                "aurora_required": aurora_required,
+                "aurora_observed": aurora_observed,
                 "aurora_connected": aurora_connected,
                 "aurora_standing_known": aurora_standing_known,
                 "robot_standing": aurora_standing,
@@ -164,7 +246,6 @@ class RobotService:
 
     def mapping_readiness(self, snap: dict[str, Any] | None = None, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
         snap = snap or self.state.snapshot()
-        aurora = aurora or self.aurora.state()
         blockers: list[str] = []
         warnings: list[str] = []
 
@@ -180,23 +261,6 @@ class RobotService:
         if snap["health"].get("has_error") or snap["health"].get("has_fatal"):
             blockers.append("health_error")
 
-        aurora_connected = bool(aurora.get("connected"))
-        aurora_standing = bool(aurora.get("standing"))
-        aurora_standing_known = bool(aurora.get("standing_known", "standing" in aurora))
-        if self.config.require_aurora:
-            if not aurora_connected:
-                blockers.append("aurora_unavailable")
-            elif aurora_standing_known and not aurora_standing:
-                blockers.append("robot_not_standing")
-            elif not aurora_standing_known:
-                warnings.append("aurora_standing_unknown")
-        elif not aurora_connected:
-            warnings.append("aurora_unavailable")
-        elif aurora_standing_known and not aurora_standing:
-            warnings.append("robot_not_standing")
-        elif not aurora_standing_known:
-            warnings.append("aurora_standing_unknown")
-
         if snap["odom_status_code"] is None:
             warnings.append("odom_status_not_published_in_mapping")
 
@@ -210,9 +274,45 @@ class RobotService:
                 "mapping_mode": self._is_mapping_mode(snap["slam_mode"]),
                 "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
-                "aurora_connected": aurora_connected,
-                "aurora_standing_known": aurora_standing_known,
-                "robot_standing": aurora_standing,
+                "manual_motion": True,
+                "motion_source": "remote_or_joystick",
+            },
+        }
+
+    def poi_readiness(self, snap: dict[str, Any] | None = None) -> dict[str, Any]:
+        snap = snap or self.state.snapshot()
+        blockers: list[str] = []
+        warnings: list[str] = []
+
+        if not self.ros.available:
+            blockers.append("ros_python_unavailable")
+        elif not self.ros.ready:
+            blockers.append("ros_bridge_not_ready")
+
+        if not snap["current_map"]:
+            blockers.append("map_not_loaded")
+        if snap["slam_mode"] not in {"localization", "loc", "1"}:
+            warnings.append("not_in_localization_mode")
+        if snap["pose_age_sec"] is None or snap["pose_age_sec"] > 3.0:
+            blockers.append("robot_pose_not_fresh")
+        if snap["odom_status_code"] != 2:
+            blockers.append("localization_not_good")
+        if snap["health"].get("has_error") or snap["health"].get("has_fatal"):
+            blockers.append("health_error")
+
+        return {
+            "ready": not blockers,
+            "blockers": blockers,
+            "warnings": warnings,
+            "checks": {
+                "ros_available": self.ros.available,
+                "ros_ready": self.ros.ready,
+                "map_loaded": bool(snap["current_map"]),
+                "localization_good": snap["odom_status_code"] == 2,
+                "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
+                "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
+                "manual_motion": True,
+                "motion_source": "remote_or_joystick",
             },
         }
 
@@ -261,11 +361,11 @@ class RobotService:
     def wait_for_localization(self, timeout_sec: float = 30.0) -> dict[str, Any]:
         start = time.monotonic()
         while time.monotonic() - start < timeout_sec:
-            readiness = self.readiness()
+            readiness = self.poi_readiness()
             if readiness["checks"]["localization_good"] and readiness["checks"]["pose_fresh"]:
                 return {"ready": True, "elapsed_sec": round(time.monotonic() - start, 2)}
             time.sleep(0.2)
-        return {"ready": False, "elapsed_sec": round(time.monotonic() - start, 2), "readiness": self.readiness()}
+        return {"ready": False, "elapsed_sec": round(time.monotonic() - start, 2), "readiness": self.poi_readiness()}
 
     def add_current_pose_to_nav_points(self, name: str = "") -> dict[str, Any]:
         points, map_file, initial_pose = self.store.load_nav_points()
@@ -319,15 +419,22 @@ class RobotService:
                 self.state.mark_error("navigation precheck failed", status_code=409)
                 return {"status": "blocked", "message": "navigation precheck failed", "precheck": check, "status_code": 409}
 
-            stand = self.aurora.ensure_stand()
-            if self.config.require_aurora and not stand.get("success"):
+            motion_guard = self.prepare_auto_navigation_motion()
+            if motion_guard.get("required") and not motion_guard.get("success"):
                 self.state.mark_error("ensure_stand failed", status_code=409)
-                return {"status": "blocked", "message": "ensure_stand failed", "aurora": stand, "status_code": 409}
+                return {"status": "blocked", "message": "ensure_stand failed", "motion_guard": motion_guard, "status_code": 409}
 
             self.state.set_navigation_task({"status": "running", "label": label, "target": target, "started_at": now_ms()})
             result = self._safe_ros_call(lambda: self.ros.navigate_to_pose(target, wait=False), "navigate_to")
             self.state.set_current_action({"action_name": "navigate_to_pose", "target": target, "result": result})
-            return {"status": "success" if result.get("accepted", result.get("success", False)) else "failed", "message": "Navigation command sent", "target": target, "status_code": self.state.status_code, "result": result}
+            return {
+                "status": "success" if result.get("accepted", result.get("success", False)) else "failed",
+                "message": "Navigation command sent",
+                "target": target,
+                "motion_guard": motion_guard,
+                "status_code": self.state.status_code,
+                "result": result,
+            }
 
     def start_cruise(self, force: bool = False) -> dict[str, Any]:
         points, _, _ = self.store.load_nav_points()
@@ -338,6 +445,11 @@ class RobotService:
         if not check["ok"]:
             self.state.mark_error("cruise precheck failed", status_code=409)
             return {"status": "blocked", "message": "cruise precheck failed", "precheck": check, **self.legacy_status()}
+
+        motion_guard = self.prepare_auto_navigation_motion()
+        if motion_guard.get("required") and not motion_guard.get("success"):
+            self.state.mark_error("ensure_stand failed", status_code=409)
+            return {"status": "blocked", "message": "ensure_stand failed", "motion_guard": motion_guard, **self.legacy_status()}
 
         if self.state.snapshot()["is_cruising"]:
             self.stop_cruise(cancel_robot=True)
@@ -353,19 +465,20 @@ class RobotService:
         self.events.publish({"event_type": "cruise_start", "timestamp": now_ms(), "total_points": len(points), "first_target": points[0]})
         self._cruise_thread = threading.Thread(target=self._cruise_loop, args=(points,), name="cruise-runner", daemon=True)
         self._cruise_thread.start()
-        return self.legacy_status()
+        return {**self.legacy_status(), "motion_guard": motion_guard}
 
     def stop_cruise(self, cancel_robot: bool = True) -> dict[str, Any]:
         was_cruising = self.state.snapshot()["is_cruising"]
         self._cruise_stop.set()
         self._cruise_pause.clear()
         thread = self._cruise_thread
+        motion_stop: dict[str, Any] | None = None
         if cancel_robot:
             try:
                 self.ros.cancel_current_action()
             except Exception:
                 pass
-            self.aurora.stop_motion()
+            motion_stop = self.stop_motion_by_policy()
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
             if not thread.is_alive():
@@ -375,7 +488,20 @@ class RobotService:
         self.state.set_navigation_task({"status": "idle"})
         if was_cruising:
             self.events.publish({"event_type": "cruise_stop", "timestamp": now_ms(), "completed_points": self.state.current_nav_index, "total_points": self.state.total_nav_points})
-        return self.legacy_status()
+        status = self.legacy_status()
+        if motion_stop is not None:
+            status["motion_stop"] = motion_stop
+        return status
+
+    def cancel_navigation(self) -> dict[str, Any]:
+        result = self._safe_ros_call(lambda: self.ros.cancel_current_action(), "cancel")
+        motion_stop = self.stop_motion_by_policy()
+        self._cruise_stop.set()
+        self._cruise_pause.clear()
+        self.state.is_cruising = False
+        self.state.is_paused = False
+        self.state.set_navigation_task({"status": "idle"})
+        return {"result": result, "motion_stop": motion_stop, "status": self.legacy_status()}
 
     def pause_nav(self) -> dict[str, Any]:
         self._cruise_pause.set()
@@ -455,6 +581,48 @@ class RobotService:
         result = self._safe_ros_call(lambda: self.ros.get_current_action(), "get_current_action")
         self.state.set_current_action(result)
         return {"ros": result, "cached": self.state.snapshot()["current_action"], "action_status": self.state.snapshot()["action_status"]}
+
+    def prepare_auto_navigation_motion(self) -> dict[str, Any]:
+        policy = self._motion_policy()
+        if not self._motion_guard_requires_aurora():
+            return {
+                "success": True,
+                "required": False,
+                "skipped": True,
+                "policy": policy,
+                "message": "Aurora motion guard disabled; Nav2 owns autonomous navigation command",
+            }
+        result = self.aurora.ensure_stand()
+        result["required"] = True
+        result["policy"] = policy
+        return result
+
+    def stop_motion_by_policy(self) -> dict[str, Any]:
+        policy = self._motion_policy()
+        if not self._motion_guard_requires_aurora():
+            return {
+                "success": True,
+                "required": False,
+                "skipped": True,
+                "policy": policy,
+                "message": "Aurora stop_motion skipped by motion policy",
+            }
+        result = self.aurora.stop_motion()
+        result["required"] = True
+        result["policy"] = policy
+        return result
+
+    def _motion_policy(self) -> str:
+        policy = (self.config.motion_guard or "none").strip().lower()
+        if policy in {"none", "observe", "aurora"}:
+            return policy
+        return "none"
+
+    def _motion_guard_requires_aurora(self) -> bool:
+        return self.config.require_aurora or self._motion_policy() == "aurora"
+
+    def _motion_guard_observes_aurora(self) -> bool:
+        return self._motion_policy() in {"observe", "aurora"} or self.config.require_aurora
 
     @staticmethod
     def _is_mapping_mode(mode: Any) -> bool:

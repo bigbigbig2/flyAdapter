@@ -101,19 +101,28 @@ function auroraVelocitySource(aurora) {
   return aurora?.raw?.value?.velocity_source_name || aurora?.velocity_source_name || "-";
 }
 
+function motionAuthority(status) {
+  return status.motion_authority || status.workflow?.motion_authority || {};
+}
+
 function renderStatus(status, slamStatus) {
   const runtime = status.runtime || {};
   const readiness = status.readiness || {};
   const mappingReadiness = status.mapping_readiness || slamStatus.mapping_readiness || {};
+  const poiReadiness = status.poi_readiness || status.workflow?.manual_poi || {};
   const aurora = status.aurora || {};
+  const motion = motionAuthority(status);
   const ros = status.ros || {};
   const mapPath = runtime.current_map || slamStatus.map_file || "-";
   const slamMode = runtime.slam_mode || slamStatus.slam_mode || "-";
   const navReady = Boolean(readiness.ready);
   const mapReady = Boolean(mappingReadiness.ready || slamStatus.ready_for_mapping);
+  const auroraRequired = Boolean(motion.aurora_required || readiness.checks?.aurora_required);
 
   $("rosStatus").textContent = ros.ready ? "ready" : "not ready";
-  $("auroraStatus").textContent = aurora.connected ? (aurora.standing ? `standing · ${auroraVelocitySource(aurora)}` : "connected") : "unavailable";
+  $("auroraStatus").textContent = aurora.connected
+    ? (aurora.standing ? `standing · ${auroraVelocitySource(aurora)}` : "connected")
+    : (auroraRequired ? "unavailable" : `optional · ${motion.policy || "none"}`);
   $("slamStatus").textContent = slamMode;
   $("mappingReady").textContent = boolText(mapReady);
   $("navigationReady").textContent = boolText(navReady);
@@ -121,15 +130,20 @@ function renderStatus(status, slamStatus) {
 
   $("checkAdapter").textContent = "online";
   $("checkRos").textContent = statusWord(ros.ready);
-  $("checkAurora").textContent = aurora.connected ? "connected" : "unavailable";
-  $("checkBody").textContent = aurora.standing ? "standing" : "unknown";
+  $("checkAurora").textContent = auroraRequired ? (aurora.connected ? "connected" : "required") : `optional (${motion.policy || "none"})`;
+  $("checkBody").textContent = motion.authority || (aurora.standing ? "standing" : "external");
 
   $("mappingModeCheck").textContent = mappingReadiness.checks?.mapping_mode ? "mapping" : slamMode;
   $("mappingPoseCheck").textContent = statusWord(mappingReadiness.checks?.pose_fresh);
   $("mappingHealthCheck").textContent = statusWord(mappingReadiness.checks?.health_ok);
-  $("mappingControlSource").textContent = auroraVelocitySource(aurora);
+  $("mappingControlSource").textContent = mappingReadiness.checks?.motion_source || "remote_or_joystick";
 
-  setJson("readinessBox", readiness);
+  setJson("readinessBox", {
+    motion_authority: motion,
+    mapping_readiness: mappingReadiness,
+    poi_readiness: poiReadiness,
+    navigation_readiness: readiness,
+  });
   setJson("mappingBox", {
     ready_for_mapping: mapReady,
     slam_mode: slamMode,
@@ -155,7 +169,7 @@ function renderStatus(status, slamStatus) {
   setBadge("cruiseHint", runtime.is_cruising ? "ok" : "warn", runtime.is_cruising ? "巡航中" : "未巡航");
   setBadge("saveHint", mapPath !== "-" ? "ok" : "warn", mapPath !== "-" ? "地图路径已记录" : "待保存");
 
-  setStepState("stepCheckState", ros.ready && aurora.connected ? "通过" : "待处理");
+  setStepState("stepCheckState", ros.ready ? "通过" : "待处理");
   setStepState("stepMappingState", mapReady ? "可建图" : "待确认");
   setStepState("stepSaveState", mapPath !== "-" ? "路径已记录" : "待保存");
   setStepState("stepLocalizationState", navReady ? "可导航" : "待定位");
@@ -431,23 +445,31 @@ async function auroraReset() {
 }
 
 async function runAcceptance() {
-  const [health, status, readiness, points, aurora] = await Promise.all([
+  const [health, status, workflow, points] = await Promise.all([
     api("/healthz", { updateLast: false, log: false }),
     api("/robot/status", { updateLast: false, log: false }),
-    api("/robot/readiness", { updateLast: false, log: false }),
+    api("/robot/workflow/status", { updateLast: false, log: false }),
     api("/slam/nav_points", { updateLast: false, log: false }),
-    api("/robot/aurora/state", { updateLast: false, log: false }),
   ]);
+  const motion = workflow.motion_authority || motionAuthority(status);
+  const auroraRequired = Boolean(motion.aurora_required);
+  const aurora = workflow.aurora || status.aurora || {};
+  const mapping = workflow.manual_mapping || status.mapping_readiness || {};
+  const poi = workflow.manual_poi || status.poi_readiness || {};
+  const navigation = workflow.auto_navigation || status.readiness || {};
   const checks = [
     ["Adapter", Boolean(health.ok), health.namespace || ""],
     ["ROS", Boolean(status.ros?.ready), status.ros?.error || "ready"],
-    ["Aurora", Boolean(aurora.connected), aurora.standing ? "standing" : "connected"],
+    ["运动策略", true, `${motion.policy || "none"} · ${motion.authority || "external"}`],
+    ["Aurora", !auroraRequired || Boolean(aurora.connected), auroraRequired ? (aurora.standing ? "standing" : "required") : "optional"],
     ["地图", Boolean(status.runtime?.current_map), status.runtime?.current_map || "-"],
+    ["手动建图", Boolean(mapping.ready), (mapping.blockers || []).join(", ") || "ready"],
+    ["手动打点", Boolean(poi.ready), (poi.blockers || []).join(", ") || "ready"],
     ["点位", (points.count || 0) > 0, `${points.count || 0} 点`],
-    ["导航就绪", Boolean(readiness.ready), (readiness.blockers || []).join(", ") || "ready"],
+    ["导航就绪", Boolean(navigation.ready), (navigation.blockers || []).join(", ") || "ready"],
   ];
   renderAcceptance(checks);
-  setJson("acceptanceBox", { health, readiness, points, aurora, status });
+  setJson("acceptanceBox", { health, workflow, points, status });
   setStepState("stepAcceptanceState", checks.every((item) => item[1]) ? "通过" : "待处理");
 }
 

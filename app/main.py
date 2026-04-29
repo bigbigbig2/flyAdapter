@@ -31,7 +31,8 @@ def create_app() -> FastAPI:
         title="GR3 Robot Adapter",
         description=(
             "GR3 机器人适配服务。外层兼容原 Unitree /slam 与 /audio 接口，"
-            "内部桥接 HumanoidNav ROS2，并通过 Aurora Agent 调用底层运动控制。默认命名空间为 /GR301AA0025。"
+            "内部桥接 HumanoidNav ROS2。建图/打点默认由遥控器控制运动，"
+            "Aurora 仅在 MOTION_GUARD=observe/aurora 时作为诊断或自动导航保护链路。默认命名空间为 /GR301AA0025。"
         ),
         version="0.1.0",
         openapi_tags=[
@@ -41,7 +42,7 @@ def create_app() -> FastAPI:
             },
             {
                 "name": "gr3-debug",
-                "description": "GR3 内部调试接口，用于检查 readiness、ROS2、Aurora Agent、地图、POI、巡航任务。",
+                "description": "GR3 内部调试接口，用于检查 workflow readiness、ROS2、运动策略、地图、POI、巡航任务。",
             },
         ],
     )

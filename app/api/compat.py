@@ -102,7 +102,7 @@ def start_show_cruise(request: Request, body: StartShowCruiseRequest) -> dict:
 
 @router.post("/slam/stop_cruise", summary="停止巡航")
 def stop_cruise(request: Request) -> dict:
-    """停止适配层巡航线程，取消当前 Nav2 goal，并调用 Aurora stop_motion 兜底。"""
+    """停止适配层巡航线程并取消当前 Nav2 goal；只有运动策略要求 Aurora 时才补充 stop_motion。"""
     return service(request).stop_cruise()
 
 

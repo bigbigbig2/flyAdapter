@@ -33,7 +33,10 @@ curl http://127.0.0.1:8080/slam/status
 | `is_arrived` | 最近目标是否到达 |
 | `map_file` | 当前地图路径 |
 | `status_code` | 最近一次底层调用状态 |
+| `ready_for_mapping` | 建图模式是否满足手动建图条件 |
+| `ready_for_poi` | 定位后是否满足手动打点条件 |
 | `ready_for_navigation` | GR3 扩展字段，是否满足导航预检 |
+| `motion_authority` | 当前运动策略和控制权说明 |
 
 ### GET `/slam/pose`
 
@@ -215,19 +218,78 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 ### GET `/robot/status`
 
-聚合状态，包括 ROS、Aurora Agent 缓存、runtime、readiness。
+聚合状态，包括 ROS、可选 Aurora 缓存、runtime、三类 readiness、运动控制策略。
 
 ### GET `/robot/readiness`
 
-查看导航前预检。
+查看自动导航前预检。只有 `MOTION_GUARD=aurora` 或 `REQUIRE_AURORA=1` 时，Aurora 才会成为 blocker。
+
+### GET `/robot/workflow/status`
+
+一次返回三套流程状态：
+
+- `manual_mapping`：手动建图就绪。
+- `manual_poi`：手动打点就绪。
+- `auto_navigation`：自动导航就绪。
+- `motion_authority`：当前运动控制策略。
+
+```bash
+curl http://127.0.0.1:8080/robot/workflow/status
+```
+
+### GET `/robot/readiness/mapping`
+
+建图前检查。只检查 ROS、mapping 模式、位姿新鲜度、HumanoidNav health，不检查 Aurora。
+
+```bash
+curl http://127.0.0.1:8080/robot/readiness/mapping
+```
+
+### GET `/robot/readiness/poi`
+
+手动打点前检查。要求地图已加载、定位 GOOD、位姿新鲜，不检查 Aurora。
+
+```bash
+curl http://127.0.0.1:8080/robot/readiness/poi
+```
+
+### GET `/robot/readiness/navigation`
+
+自动导航前检查，等价于新版语义下的 `/robot/readiness`。
+
+```bash
+curl http://127.0.0.1:8080/robot/readiness/navigation
+```
+
+### GET `/robot/motion/authority`
+
+查看运动控制权策略。
+
+```bash
+curl http://127.0.0.1:8080/robot/motion/authority
+```
+
+默认应看到：
+
+```plain
+policy=none
+aurora_required=false
+manual_mapping_motion=remote_or_joystick
+manual_poi_motion=remote_or_joystick
+auto_navigation_motion=nav2_goal
+```
+
+### POST `/robot/motion/safety_stop`
+
+取消当前导航。默认 `MOTION_GUARD=none` 时只取消 Nav2 goal；`MOTION_GUARD=aurora` 时额外调用 Aurora `stop_motion`。
 
 ### POST `/robot/aurora/ensure_stand`
 
-通过 Aurora Agent 让机器人进入站立态。
+通过 Aurora Agent 让机器人进入站立态。默认手动建图/打点流程不需要调用。
 
 ### POST `/robot/aurora/stop_motion`
 
-通过 Aurora Agent 停止机体运动。
+通过 Aurora Agent 停止机体运动。默认手动建图/打点流程不需要调用。
 
 ### POST `/robot/aurora/reset`
 
@@ -272,5 +334,5 @@ http://机器人IP:8080/
 - 保存当前位置为导航点。
 - 开始 / 暂停 / 恢复 / 停止巡航。
 - 按坐标导航。
-- Aurora ensure_stand / stop_motion。
+- 可选 Aurora ensure_stand / stop_motion。
 - SSE 事件查看。
