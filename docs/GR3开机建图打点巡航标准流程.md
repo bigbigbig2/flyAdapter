@@ -18,7 +18,7 @@ GR301AA0025
 http://127.0.0.1:8080
 ```
 
-如果现场不是本机访问，把 `127.0.0.1` 换成机器人 IP。
+如果现场不是本机访问，把 `127.**0**.0.1` 换成机器人 IP。
 
 ---
 
@@ -274,6 +274,48 @@ curl -X POST http://127.0.0.1:8080/slam/start_mapping
 - `slam_mode` 为 `mapping` 或底层返回建图模式。
 - `robot_pose` 有持续更新。
 
+这时 `/slam/status` 里如果看到：
+
+```plain
+slam_mode=mapping
+odom_status_code=1
+localization_status=INITIALIZING
+ready_for_navigation=false
+```
+
+这是正常的。建图模式不是导航模式，`ready_for_navigation=false` 不代表服务异常。导航前必须先保存地图、加载地图进入定位，并等 `odom_status_code=2`。
+
+### 8.1 打开建图 RViz
+
+开始建图后，另开一个有图形环境的终端启动建图可视化：
+
+```bash
+cd ~/aurora_ws/gr3 || exit 1
+chmod +x scripts/open_rviz.sh
+./scripts/open_rviz.sh mapping
+```
+
+等价完整命令：
+
+```bash
+cd ~/aurora_ws/gr3 || exit 1
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+
+rviz2 -d rviz/mapping_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static
+```
+
+建图 RViz 主要看：
+
+- `/GR301AA0025/map`：当前 2D 地图。
+- `/GR301AA0025/scan`：当前 2D 激光。
+- `/GR301AA0025/cloud_registered_gravity`：当前配准点云。
+- `/GR301AA0025/odom`：里程计轨迹。
+- TF 是否能连到 `map`。
+
 ---
 
 ## 9. 建图操作规范
@@ -298,6 +340,7 @@ curl http://127.0.0.1:8080/slam/status
 
 - Fixed Frame 使用 `map`。
 - TF topic remap 到 `/GR301AA0025/tf`、`/GR301AA0025/tf_static`。
+- 建图阶段使用 `rviz/mapping_GR301AA0025.rviz`。
 
 ---
 
@@ -370,6 +413,37 @@ curl http://127.0.0.1:8080/robot/readiness
 - `pose_age_sec <= 3`。
 - `odom_status_code=2`。
 - `/robot/readiness` 没有 `localization_not_good`。
+
+### 11.1 打开定位 / 重定位 RViz
+
+地图加载后，另开一个有图形环境的终端启动定位可视化：
+
+```bash
+cd ~/aurora_ws/gr3 || exit 1
+chmod +x scripts/open_rviz.sh
+./scripts/open_rviz.sh relocation
+```
+
+等价完整命令：
+
+```bash
+cd ~/aurora_ws/gr3 || exit 1
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+
+rviz2 -d rviz/relocation_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static
+```
+
+定位 RViz 主要看：
+
+- `/GR301AA0025/map`：已加载地图。
+- `/GR301AA0025/scan`：当前激光是否和地图轮廓对齐。
+- `/GR301AA0025/odom`：机器人当前位置是否合理。
+- `/GR301AA0025/plan`：导航时的全局路径。
+- TF 是否存在 `map -> odom -> base_link` 或等效链路。
 
 如果定位不稳定，可以发布初始位姿：
 
@@ -689,6 +763,10 @@ curl -X POST http://127.0.0.1:8080/slam/save_nav_points
 curl http://127.0.0.1:8080/slam/status
 curl http://127.0.0.1:8080/robot/readiness
 
+# RViz
+./scripts/open_rviz.sh mapping
+./scripts/open_rviz.sh relocation
+
 # 建图
 curl -X POST http://127.0.0.1:8080/slam/start_mapping
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
@@ -718,4 +796,3 @@ curl -X POST http://127.0.0.1:8080/slam/start_cruise \
 curl http://127.0.0.1:8080/slam/nav_status
 curl -X POST http://127.0.0.1:8080/slam/stop_cruise
 ```
-
