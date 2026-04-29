@@ -27,6 +27,12 @@ fi
 echo "[gr3-rviz] mode=${MODE}"
 echo "[gr3-rviz] config=${CONFIG}"
 
+if [ "${GR3_RVIZ_SOFTWARE:-1}" = "1" ]; then
+  export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+  export QT_X11_NO_MITSHM="${QT_X11_NO_MITSHM:-1}"
+  echo "[gr3-rviz] software_rendering=on"
+fi
+
 exec rviz2 -d "$CONFIG" \
   --ros-args \
   -r tf:=/GR301AA0025/tf \

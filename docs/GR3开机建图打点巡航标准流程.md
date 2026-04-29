@@ -1,24 +1,57 @@
 # GR3 开机-建图-打点-巡航标准流程
 
-本文档是一套现场标准作业流程，适用于从机器人开机开始，完成：
+这份文档是现场按步骤操作的 SOP，目标是从机器人开机开始，完整完成：
 
 ```plain
-开机检查 -> 启动底层服务 -> 建图 -> 保存地图 -> 加载地图定位 -> 打点 -> 单点验证 -> 多点巡航 -> 收尾
+安全检查 -> 启动底层服务 -> 启动适配服务 -> 建图 -> 保存地图
+-> 加载地图定位 -> 打点 -> 单点验证 -> 多点巡航 -> 背包接入验收 -> 收尾
 ```
 
-默认命名空间：
+默认配置：
 
 ```plain
-GR301AA0025
+机器人命名空间：GR301AA0025
+工程目录：~/aurora_ws/flyAdapter
+Adapter 地址：http://127.0.0.1:8080
+Aurora Agent 地址：http://127.0.0.1:18080
 ```
 
-默认 Adapter 地址：
+如果在外部电脑访问机器人，把 `127.0.0.1` 换成机器人 IP。机器人本机终端里仍然使用 `127.0.0.1`。
 
-```plain
-http://127.0.0.1:8080
+---
+
+## 0. 操作终端规划
+
+建议固定开 5 个终端，避免把服务和检查命令混在一起：
+
+| 终端 | 用途 | 是否常驻 |
+| --- | --- | --- |
+| 终端 1 | AuroraCore | 常驻 |
+| 终端 2 | HumanoidNav | 常驻 |
+| 终端 3 | Aurora Agent | 常驻 |
+| 终端 4 | GR3 Adapter | 常驻 |
+| 终端 5 | curl、ROS2 检查、RViz | 临时操作 |
+
+每打开一个新终端，先准备常用变量：
+
+```bash
+export PROJECT_DIR=~/aurora_ws/flyAdapter
+export NS=/GR301AA0025
+export ADAPTER_URL=http://127.0.0.1:8080
+export AGENT_URL=http://127.0.0.1:18080
+export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
+export MAP_NAME=showroom_1f_20260429
+export MAP_PATH=/opt/fftai/nav/maps/${MAP_NAME}
 ```
 
-如果现场不是本机访问，把 `127.**0**.0.1` 换成机器人 IP。
+进入工程目录：
+
+```bash
+cd "${PROJECT_DIR}" || exit 1
+```
+
+如果 `cd` 失败，不要继续执行后续命令。先确认工程是否真的部署在 `~/aurora_ws/flyAdapter`。
 
 ---
 
@@ -28,25 +61,29 @@ http://127.0.0.1:8080
 
 - 机器人周围 1.5 米内没有人、线缆、杂物。
 - 急停按钮可用，现场人员知道急停位置。
-- 电量充足，建图和巡航过程中不要低电量测试。
-- 地面环境适合建图：光照稳定、可通行区域清晰、临时障碍尽量移走。
+- 电量充足，不建议低电量建图或巡航。
 - 背包、雷达、相机、网络连接正常。
-- 如果要巡航，路线上的门、坡、窄通道要先人工确认。
+- 建图区域的门、坡、窄通道、临时障碍已经人工确认。
+- 巡航路线中不会有人长期站在机器人必经路线上。
 
 操作原则：
 
-- 建图阶段慢速推/走，路线闭环，避免快速旋转。
-- 打点只在定位稳定后进行。
-- 巡航先短距离、低风险点位验证，再跑完整路线。
-- 不建议常态使用 `force=true`，除非明确知道 readiness blocker 可忽略。
+- 建图阶段低速移动，转弯慢，尽量闭环。
+- 定位稳定后再打点。
+- 先单点验证，再短路线巡航，最后跑完整路线。
+- 正式验收不要依赖 `force=true`，除非明确知道 blocker 可以忽略。
+
+继续下一步条件：
+
+```plain
+现场安全、急停、网络、电量、传感器都确认正常。
+```
 
 ---
 
 ## 2. 命名规范
 
-建议统一命名，方便背包和现场排查。
-
-地图目录：
+地图目录建议：
 
 ```plain
 /opt/fftai/nav/maps/<场地>_<楼层>_<日期>
@@ -58,7 +95,7 @@ http://127.0.0.1:8080
 /opt/fftai/nav/maps/showroom_1f_20260429
 ```
 
-点位名称：
+点位命名建议：
 
 ```plain
 <区域>_<序号>_<含义>
@@ -73,7 +110,7 @@ corridor_01_turn
 rooma_01_door
 ```
 
-巡航路线名称：
+巡航路线命名建议：
 
 ```plain
 <场地>_<路线>_<版本>
@@ -87,29 +124,37 @@ showroom_main_v1
 
 ---
 
-## 3. 开机和网络确认
+## 3. 开机和基础环境确认
 
-机器人上电后，先登录机器人：
+登录机器人：
 
 ```bash
 ssh -X gr301ab0113@<robot-ip>
 ```
 
-确认基础网络：
+确认机器、时间、磁盘和工程目录：
 
 ```bash
 hostname
+date
+df -h /opt/fftai/nav ~
+test -d "${PROJECT_DIR}" && echo PROJECT_DIR_OK
+```
+
+确认网络：
+
+```bash
 ip addr
 ping -c 3 127.0.0.1
 ```
 
-进入工程目录：
+继续下一步条件：
 
-```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+```plain
+PROJECT_DIR_OK 出现；
+/opt/fftai/nav 所在磁盘空间足够；
+机器人网络正常。
 ```
-
-如果这个目录不存在，不要继续执行。先确认工程部署位置。
 
 ---
 
@@ -120,25 +165,45 @@ cd ~/aurora_ws/flyAdapter || exit 1
 ```bash
 sudo docker start fourier_aurora_server
 sudo docker exec -it fourier_aurora_server bash
+```
 
+进入容器后：
+
+```bash
 cd /workspace || exit 1
 grep -E "DomainID|RobotName|RunType" config/config.yaml
-
 AuroraCore --config config/config.yaml
 ```
 
-要求：
-
-- `RobotName` 与后面 `AURORA_ROBOT_NAME` 一致。
-- `DomainID` 与后面 `AURORA_DOMAIN_ID` 一致。
-- AuroraCore 进程保持运行。
-
-示例环境变量：
+需要重点确认：
 
 ```plain
-AURORA_DOMAIN_ID=123
-AURORA_ROBOT_NAME=gr3v233
+DomainID = 123
+RobotName = gr3v233
 ```
+
+这两个值必须和后面的 Aurora Agent 环境变量一致：
+
+```bash
+export AURORA_DOMAIN_ID=123
+export AURORA_ROBOT_NAME=gr3v233
+```
+
+另开检查命令：
+
+```bash
+sudo docker ps | grep fourier_aurora_server
+```
+
+继续下一步条件：
+
+```plain
+AuroraCore 进程保持运行；
+容器没有退出；
+DomainID 和 RobotName 与现场变量一致。
+```
+
+如果 Aurora Agent 后面报 `Unmatched subscriber: rt/aurora_state`，优先回到这一步检查 AuroraCore、DomainID、RobotName 和容器网络。
 
 ---
 
@@ -159,11 +224,33 @@ source /opt/fftai/humanoidnav/install/setup.bash
   --namespace GR301AA0025
 ```
 
-要求：
+注意：
 
-- 全流程统一使用 `GR301AA0025`。
-- 进程保持运行。
-- 如果要打开 RViz，另开终端启动，不要影响主进程。
+- 全流程命名空间统一为 `GR301AA0025`。
+- 这里使用 `--no-rviz`，RViz 后面单独开。
+- 这个终端要保持运行。
+
+另开终端 5 检查 ROS2 接口：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+
+ros2 service list | egrep "/GR301AA0025/(slam/set_mode|slam/save_map|slam/load_map|cancel_current_action|get_current_action)"
+ros2 action list | grep /GR301AA0025/navigate_to_pose
+timeout 5s ros2 topic echo /GR301AA0025/robot_pose --once
+timeout 5s ros2 topic echo /GR301AA0025/slam/mode_status --once
+```
+
+继续下一步条件：
+
+```plain
+能看到 slam/set_mode、slam/save_map、slam/load_map；
+能看到 /GR301AA0025/navigate_to_pose；
+robot_pose 能 echo 到数据。
+```
+
+如果这里查不到接口，Adapter 后面的 `/slam/start_mapping`、`/slam/relocation`、`/slam/start_cruise` 都不会真正可用。
 
 ---
 
@@ -172,7 +259,7 @@ source /opt/fftai/humanoidnav/install/setup.bash
 终端 3：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+cd "${PROJECT_DIR}" || exit 1
 
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
@@ -187,19 +274,38 @@ chmod +x scripts/run_aurora_agent.sh
 ./scripts/run_aurora_agent.sh
 ```
 
-另开测试终端检查：
+终端 5 检查：
 
 ```bash
-curl http://127.0.0.1:18080/health
-curl http://127.0.0.1:18080/state
+curl ${AGENT_URL}/health
+curl ${AGENT_URL}/state
+curl ${AGENT_URL}/diagnostics
 ```
 
-要求：
+正常结果要点：
 
-- `fourier_aurora_client.AuroraClient: ok`
-- `connected=true`
+```plain
+available=true
+connected=true
+mock=false
+import_attempts 里有 fourier_aurora_client.AuroraClient: ok
+module_diagnostics 里能找到 fourier_msgs.msg.AuroraCmd
+```
 
-如果出现 DDS unmatched，优先检查 AuroraCore、`DomainID`、`RobotName`、容器网络。
+如果 AuroraCore 重启过，重置 Agent SDK 客户端：
+
+```bash
+curl -X POST ${AGENT_URL}/reset
+curl ${AGENT_URL}/state
+```
+
+继续下一步条件：
+
+```plain
+Aurora Agent 能返回 state；
+connected=true；
+没有 DDS unmatched 或 SDK import 错误。
+```
 
 ---
 
@@ -208,7 +314,7 @@ curl http://127.0.0.1:18080/state
 终端 4：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+cd "${PROJECT_DIR}" || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -228,53 +334,73 @@ chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh
 ```
 
-基础检查：
+终端 5 检查：
 
 ```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/robot/status
-curl http://127.0.0.1:8080/slam/status
+curl ${ADAPTER_URL}/healthz
+curl ${ADAPTER_URL}/robot/status
+curl ${ADAPTER_URL}/slam/status
+curl ${ADAPTER_URL}/robot/readiness
 ```
 
-要求：
+正常结果要点：
 
-- `healthz.ok=true`
-- `ros.ready=true`
-- `aurora.backend=agent`
-- `adapter.namespace=/GR301AA0025`
+```plain
+healthz.ok=true
+adapter.namespace=/GR301AA0025
+ros.available=true
+ros.ready=true
+aurora.backend=agent
+aurora.connected=true
+```
+
+也可以打开 Swagger 调试页：
+
+```plain
+http://127.0.0.1:8080/docs
+```
+
+继续下一步条件：
+
+```plain
+Adapter 启动；
+ROS ready；
+Aurora connected；
+/slam/status 能稳定返回。
+```
 
 ---
 
-## 8. 建图前检查
+## 8. 建图前检查和进入建图模式
 
-检查 ROS2 接口：
-
-```bash
-source /opt/ros/humble/setup.bash
-source /opt/fftai/humanoidnav/install/setup.bash
-
-ros2 service list | egrep "/GR301AA0025/(slam/set_mode|slam/save_map|slam/load_map)"
-ros2 topic list | egrep "/GR301AA0025/(robot_pose|slam/mode_status|map|scan)"
-```
-
-检查当前模式：
+先设置本次地图名：
 
 ```bash
-curl http://127.0.0.1:8080/slam/status
+export MAP_NAME=showroom_1f_20260429
+export MAP_PATH=/opt/fftai/nav/maps/${MAP_NAME}
+echo "${MAP_PATH}"
 ```
 
-如果不在 mapping，可以切换：
+确认当前状态：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/start_mapping
+curl ${ADAPTER_URL}/slam/status
+curl ${ADAPTER_URL}/slam/pose
 ```
 
-预期：
+切换到建图模式：
 
-- `slam_mode` 为 `mapping` 或底层返回建图模式。
-- `robot_pose` 有持续更新。
+```bash
+curl -X POST ${ADAPTER_URL}/slam/start_mapping
+```
 
-这时 `/slam/status` 里如果看到：
+再次确认：
+
+```bash
+curl ${ADAPTER_URL}/slam/status
+```
+
+建图模式下看到下面状态是正常的：
 
 ```plain
 slam_mode=mapping
@@ -283,455 +409,755 @@ localization_status=INITIALIZING
 ready_for_navigation=false
 ```
 
-这是正常的。建图模式不是导航模式，`ready_for_navigation=false` 不代表服务异常。导航前必须先保存地图、加载地图进入定位，并等 `odom_status_code=2`。
+原因是建图模式不是导航模式。只有保存地图、加载地图并进入定位后，`ready_for_navigation` 才应该变成 true。
 
-### 8.1 打开建图 RViz
+如果 `/slam/start_mapping` 返回：
 
-开始建图后，另开一个有图形环境的终端启动建图可视化：
+```plain
+result.success=true
+result.message=Already in mapping mode
+```
+
+这也表示已经处在建图模式，不是失败。
+
+继续下一步条件：
+
+```plain
+slam_mode 是 mapping；
+robot_pose 有数据且持续更新；
+RViz 可以打开并看到点云或地图变化。
+```
+
+---
+
+## 9. 打开建图 RViz
+
+终端 5，使用脚本：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+cd "${PROJECT_DIR}" || exit 1
 chmod +x scripts/open_rviz.sh
 ./scripts/open_rviz.sh mapping
+```
+
+脚本默认会给 RViz 加上软件渲染环境变量，避开部分机器上 Map 显示的 OpenGL shader 报错：
+
+```plain
+LIBGL_ALWAYS_SOFTWARE=1
+QT_X11_NO_MITSHM=1
+```
+
+如果要临时关闭软件渲染：
+
+```bash
+GR3_RVIZ_SOFTWARE=0 ./scripts/open_rviz.sh mapping
 ```
 
 等价完整命令：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+cd "${PROJECT_DIR}" || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
-rviz2 -d rviz/mapping_GR301AA0025.rviz \
+LIBGL_ALWAYS_SOFTWARE=1 QT_X11_NO_MITSHM=1 rviz2 -d rviz/mapping_GR301AA0025.rviz \
   --ros-args \
   -r tf:=/GR301AA0025/tf \
   -r tf_static:=/GR301AA0025/tf_static
 ```
 
-建图 RViz 主要看：
+建图 RViz 重点看：
 
-- `/GR301AA0025/map`：当前 2D 地图。
-- `/GR301AA0025/scan`：当前 2D 激光。
-- `/GR301AA0025/cloud_registered_gravity`：当前配准点云。
-- `/GR301AA0025/odom`：里程计轨迹。
-- TF 是否能连到 `map`。
+| 项 | 期望 |
+| --- | --- |
+| `/GR301AA0025/map` | 地图随建图逐步生成 |
+| `/GR301AA0025/scan` | 激光和周围环境轮廓一致 |
+| `/GR301AA0025/cloud_registered_gravity` | 点云正常刷新 |
+| `/GR301AA0025/odom` | 轨迹连续，没有大跳变 |
+| TF | 能连接到 `map` |
 
----
+Map 显示里的 `Update Topic` 必须是合法 topic，不能留空。当前工程配置为：
 
-## 9. 建图操作规范
-
-建图时按这个方式走：
-
-1. 从场地入口或固定起点开始。
-2. 先走主通道，再走支路和房间。
-3. 每个区域尽量形成闭环，最后回到起点附近。
-4. 经过门口、转角、窄通道时放慢速度。
-5. 不要长时间原地快速旋转。
-6. 不要让大量行人持续遮挡雷达。
-
-建图过程中可以轮询：
-
-```bash
-curl http://127.0.0.1:8080/slam/pose
-curl http://127.0.0.1:8080/slam/status
+```plain
+/GR301AA0025/map_updates
 ```
 
-如果使用 RViz，注意：
+如果现场没有发布这个增量 topic，不影响 RViz 显示 `/GR301AA0025/map` 全量地图；但如果配置成空字符串，RViz2 会直接报 `Invalid topic name`。
 
-- Fixed Frame 使用 `map`。
-- TF topic remap 到 `/GR301AA0025/tf`、`/GR301AA0025/tf_static`。
-- 建图阶段使用 `rviz/mapping_GR301AA0025.rviz`。
+关于 Fixed Frame：
+
+```plain
+RViz 的 Fixed Frame 使用 map，不写 /GR301AA0025/map。
+原因是 map 是 TF frame 名，不是 topic 名。
+topic 已经配置为 /GR301AA0025/...，TF 通过命令行 remap 到 /GR301AA0025/tf 和 /GR301AA0025/tf_static。
+```
+
+如果 RViz 提示 `map passed to lookupTransform argument target_frame does not exist`：
+
+```bash
+ros2 topic echo /GR301AA0025/tf --once
+ros2 topic echo /GR301AA0025/tf_static --once
+ros2 topic echo /GR301AA0025/map --once
+```
+
+优先判断是 TF 还没有发布、建图还没产生 map，还是 RViz 没有带 remap 启动。
 
 ---
 
-## 10. 保存地图
+## 10. 建图操作步骤
 
-建图结束后，设置地图保存路径：
+建图时按下面顺序走：
+
+1. 从固定入口或计划的巡航起点开始。
+2. 先走主通道，再走支路和房间。
+3. 每个区域尽量闭环，最后回到起点附近。
+4. 门口、转角、窄通道、玻璃墙附近放慢速度。
+5. 不要长时间原地快速旋转。
+6. 不要让大量行人持续遮挡雷达。
+7. 地图明显撕裂、重影或跳变时，暂停移动并检查定位和 TF。
+
+建图过程中每 30 秒检查一次：
 
 ```bash
-export MAP_PATH=/opt/fftai/nav/maps/showroom_1f_20260429
+curl ${ADAPTER_URL}/slam/status
+curl ${ADAPTER_URL}/slam/pose
+```
+
+ROS 侧也可以检查：
+
+```bash
+timeout 5s ros2 topic echo /GR301AA0025/robot_pose --once
+timeout 5s ros2 topic echo /GR301AA0025/slam/mode_status --once
+```
+
+继续下一步条件：
+
+```plain
+RViz 中地图完整；
+主要通道和目标点位区域都覆盖；
+回到起点附近后地图没有明显错位；
+robot_pose 仍然持续刷新。
+```
+
+---
+
+## 11. 保存地图
+
+确认地图路径：
+
+```bash
+echo "${MAP_PATH}"
 ```
 
 保存地图：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
+curl -X POST ${ADAPTER_URL}/slam/stop_mapping \
   -H "Content-Type: application/json" \
   -d "{\"map_path\":\"${MAP_PATH}\"}"
 ```
 
-也可以使用调试接口：
+也可以用调试接口保存：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/map/save \
+curl -X POST ${ADAPTER_URL}/robot/map/save \
   -H "Content-Type: application/json" \
   -d "{\"map_path\":\"${MAP_PATH}\"}"
 ```
 
-保存后检查：
+保存后检查文件：
 
 ```bash
-ls -lah "${MAP_PATH}"
-curl http://127.0.0.1:8080/robot/map/list
+test -d "${MAP_PATH}" && echo MAP_DIR_OK
+find "${MAP_PATH}" -maxdepth 2 -type f | sort
+curl ${ADAPTER_URL}/robot/map/list
 ```
 
-要求：
+继续下一步条件：
 
-- 地图目录存在。
-- 能看到地图相关文件。
-- `/robot/map/list` 能识别该地图。
+```plain
+MAP_DIR_OK 出现；
+地图目录中有 map/global/pcd/yaml 等相关文件；
+/robot/map/list 能识别到本次地图。
+```
+
+如果保存失败：
+
+- 先看 HumanoidNav 终端有没有 `/slam/save_map` 错误。
+- 确认 `/opt/fftai/nav/maps` 有写权限和空间。
+- 不要直接进入打点，先重新保存成功。
 
 ---
 
-## 11. 加载地图进入定位
+## 12. 加载地图并进入定位模式
 
 加载刚保存的地图：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/relocation \
+curl -X POST ${ADAPTER_URL}/slam/relocation \
   -H "Content-Type: application/json" \
-  -d "{
-    \"map_path\":\"${MAP_PATH}\",
-    \"x\":0,
-    \"y\":0,
-    \"z\":0,
-    \"yaw\":0,
-    \"wait_for_localization\":true
-  }"
+  -d "{\"map_path\":\"${MAP_PATH}\",\"x\":0,\"y\":0,\"z\":0,\"yaw\":0,\"wait_for_localization\":true}"
 ```
 
-检查定位状态：
+查询定位状态：
 
 ```bash
-curl http://127.0.0.1:8080/robot/localization/status
-curl http://127.0.0.1:8080/robot/readiness
+curl ${ADAPTER_URL}/robot/localization/status
+curl ${ADAPTER_URL}/robot/readiness
 ```
 
-要求：
-
-- `slam_mode` 为 `localization` 或等效定位模式。
-- `pose_age_sec <= 3`。
-- `odom_status_code=2`。
-- `/robot/readiness` 没有 `localization_not_good`。
-
-### 11.1 打开定位 / 重定位 RViz
-
-地图加载后，另开一个有图形环境的终端启动定位可视化：
+连续观察 30 秒：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
-chmod +x scripts/open_rviz.sh
+for i in $(seq 1 30); do
+  curl -s ${ADAPTER_URL}/robot/localization/status
+  echo
+  sleep 1
+done
+```
+
+理想状态：
+
+```plain
+slam_mode=localization
+pose_age_sec <= 3
+odom_status_code=2
+/robot/readiness 里没有 localization_not_good
+```
+
+如果位置不准，发布初始位姿：
+
+```bash
+curl -X POST ${ADAPTER_URL}/robot/localization/initial_pose \
+  -H "Content-Type: application/json" \
+  -d '{"x":0,"y":0,"z":0,"yaw":0,"frame_id":"map"}'
+```
+
+然后再次检查：
+
+```bash
+curl ${ADAPTER_URL}/robot/localization/status
+curl ${ADAPTER_URL}/robot/readiness
+```
+
+继续下一步条件：
+
+```plain
+定位模式正常；
+odom_status_code=2；
+readiness 没有 localization_not_good；
+机器人在 RViz 中的位置和现场一致。
+```
+
+---
+
+## 13. 打开定位 / 重定位 RViz
+
+终端 5：
+
+```bash
+cd "${PROJECT_DIR}" || exit 1
 ./scripts/open_rviz.sh relocation
 ```
 
 等价完整命令：
 
 ```bash
-cd ~/aurora_ws/flyAdapter || exit 1
+cd "${PROJECT_DIR}" || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
-rviz2 -d rviz/relocation_GR301AA0025.rviz \
+LIBGL_ALWAYS_SOFTWARE=1 QT_X11_NO_MITSHM=1 rviz2 -d rviz/relocation_GR301AA0025.rviz \
   --ros-args \
   -r tf:=/GR301AA0025/tf \
   -r tf_static:=/GR301AA0025/tf_static
 ```
 
-定位 RViz 主要看：
+定位 RViz 重点看：
 
-- `/GR301AA0025/map`：已加载地图。
-- `/GR301AA0025/scan`：当前激光是否和地图轮廓对齐。
-- `/GR301AA0025/odom`：机器人当前位置是否合理。
-- `/GR301AA0025/plan`：导航时的全局路径。
-- TF 是否存在 `map -> odom -> base_link` 或等效链路。
+| 项 | 期望 |
+| --- | --- |
+| `/GR301AA0025/map` | 已加载全局地图 |
+| `/GR301AA0025/scan` | 当前激光和地图轮廓对齐 |
+| `/GR301AA0025/odom` | 机器人位置合理 |
+| `/GR301AA0025/plan` | 导航时能看到路径 |
+| TF | `map -> odom -> base_link` 或等效链路连续 |
 
-如果定位不稳定，可以发布初始位姿：
+继续下一步条件：
 
-```bash
-curl -X POST http://127.0.0.1:8080/robot/localization/initial_pose \
-  -H "Content-Type: application/json" \
-  -d '{"x":0,"y":0,"z":0,"yaw":0,"frame_id":"map"}'
+```plain
+RViz 中当前机器人位置和实际位置一致；
+当前激光与全局地图基本重合；
+TF 不再持续报 map frame 缺失。
 ```
 
 ---
 
-## 12. 打点前准备
+## 14. 打点前准备
 
-清空旧点位前要确认是否需要备份。正式打点建议先清空测试点：
+正式打点前，先确认是否需要清空旧点位。
+
+查看现有点位：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/clear_nav_points
+curl ${ADAPTER_URL}/slam/nav_points
+```
+
+如果这是新地图，清空旧点位：
+
+```bash
+curl -X POST ${ADAPTER_URL}/slam/clear_nav_points
+curl ${ADAPTER_URL}/slam/nav_points
 ```
 
 确保机器人站立：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/aurora/ensure_stand
+curl -X POST ${ADAPTER_URL}/robot/aurora/ensure_stand
+curl ${ADAPTER_URL}/robot/aurora/state
 ```
 
-确保导航预检通过：
+执行导航预检：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/navigation/precheck \
+curl -X POST ${ADAPTER_URL}/robot/navigation/precheck \
   -H "Content-Type: application/json" \
   -d '{"force":false}'
 ```
 
-要求：
+继续下一步条件：
 
-- `ok=true`。
-- 如果 `ok=false`，先处理 `blockers`。
+```plain
+precheck 返回 ok=true；
+readiness.ready=true；
+aurora.standing=true；
+pose_age_sec 正常。
+```
+
+如果 `readiness.ready=false`，先处理 `blockers`。常见 blocker：
+
+| blocker | 处理 |
+| --- | --- |
+| `ros_python_unavailable` | Adapter 没 source ROS 或虚拟环境缺依赖 |
+| `robot_pose_not_fresh` | HumanoidNav/robot_pose 没更新 |
+| `localization_not_good` | 重新加载地图或发布初始位姿 |
+| `map_not_loaded` | 重新 `/slam/relocation` |
+| `aurora_unavailable` | 检查 Aurora Agent / AuroraCore |
+| `robot_not_standing` | 调 `/robot/aurora/ensure_stand` |
 
 ---
 
-## 13. 打点规范
+## 15. 逐点打点操作
 
-人工把机器人移动或导航到目标位置，确认姿态朝向正确后保存点位。
+每个点位按同一套动作执行。
 
-保存第一个点：
+第 1 步，移动到目标位置，停稳 2 到 3 秒：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/add_nav_point \
+curl ${ADAPTER_URL}/slam/pose
+curl ${ADAPTER_URL}/robot/localization/status
+```
+
+第 2 步，保存当前位置为点位：
+
+```bash
+export POINT_NAME=lobby_01_start
+
+curl -X POST ${ADAPTER_URL}/slam/add_nav_point \
   -H "Content-Type: application/json" \
-  -d '{"name":"lobby_01_start"}'
+  -d "{\"name\":\"${POINT_NAME}\"}"
 ```
 
-保存更多点：
+第 3 步，确认点位数量增加：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/add_nav_point \
+curl ${ADAPTER_URL}/slam/nav_points
+curl ${ADAPTER_URL}/robot/poi/list
+```
+
+第 4 步，每打 3 到 5 个点保存一次：
+
+```bash
+curl -X POST ${ADAPTER_URL}/slam/save_nav_points
+```
+
+继续添加更多点位：
+
+```bash
+export POINT_NAME=lobby_02_frontdesk
+curl -X POST ${ADAPTER_URL}/slam/add_nav_point \
   -H "Content-Type: application/json" \
-  -d '{"name":"lobby_02_frontdesk"}'
+  -d "{\"name\":\"${POINT_NAME}\"}"
 
-curl -X POST http://127.0.0.1:8080/slam/add_nav_point \
+export POINT_NAME=corridor_01_turn
+curl -X POST ${ADAPTER_URL}/slam/add_nav_point \
   -H "Content-Type: application/json" \
-  -d '{"name":"corridor_01_turn"}'
+  -d "{\"name\":\"${POINT_NAME}\"}"
 ```
 
-查看点位：
+点位要求：
 
-```bash
-curl http://127.0.0.1:8080/slam/nav_points
-curl http://127.0.0.1:8080/robot/poi/list
+- 不要贴墙、贴玻璃、贴障碍物。
+- 点位前方和左右要给机器人留出转身空间。
+- 需要停靠展示的点位，朝向也要调好再保存。
+- 转角和窄通道建议额外设置过渡点。
+- 起点、终点、充电区或人工接管区要单独命名。
+
+继续下一步条件：
+
+```plain
+/slam/nav_points 的 count 与现场记录一致；
+每个点位名称唯一；
+点位已保存；
+机器人仍处于定位良好状态。
 ```
-
-保存点位文件：
-
-```bash
-curl -X POST http://127.0.0.1:8080/slam/save_nav_points
-```
-
-打点要求：
-
-- 点位不要贴墙、贴玻璃、贴障碍物。
-- 点位之间预留足够转身空间。
-- 需要停靠展示的位置，朝向也要调整好再保存。
-- 每打 3 到 5 个点，建议保存一次。
 
 ---
 
-## 14. 单点导航验证
+## 16. 单点导航验证
 
-先验证每个点能否单独到达。
+不要直接跑完整巡航，先逐个验证关键点。
+
+导航到第一个点：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/navigation/goto_poi \
+curl -X POST ${ADAPTER_URL}/robot/navigation/goto_poi \
   -H "Content-Type: application/json" \
   -d '{"name":"lobby_01_start","force":false}'
 ```
 
-查看状态：
+观察状态：
 
 ```bash
-curl http://127.0.0.1:8080/slam/nav_status
-curl http://127.0.0.1:8080/robot/navigation/current_action
+watch -n 1 "curl -s ${ADAPTER_URL}/slam/nav_status"
+```
+
+另一个终端也可以看底层动作：
+
+```bash
+curl ${ADAPTER_URL}/robot/navigation/current_action
 ```
 
 取消当前导航：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/navigation/cancel
+curl -X POST ${ADAPTER_URL}/robot/navigation/cancel
 ```
 
-要求：
+对第二个点重复：
 
-- 导航请求被 accepted。
-- 机器人能到点附近。
-- 取消时能停止。
+```bash
+curl -X POST ${ADAPTER_URL}/robot/navigation/goto_poi \
+  -H "Content-Type: application/json" \
+  -d '{"name":"lobby_02_frontdesk","force":false}'
+```
 
-所有关键点位都建议先单点验证，再进入巡航。
+单点验证通过标准：
+
+```plain
+请求能 accepted 或 success；
+机器人能到达点位附近；
+到达后姿态大致正确；
+取消导航后能停止；
+RViz 中路径和实际路线合理。
+```
+
+如果某个点失败：
+
+- 点位太靠近障碍物：删除或覆盖该点。
+- 目标朝向不好：重新停稳后保存点位。
+- 路径绕路或穿墙：检查地图质量、代价地图、障碍物。
+- readiness blocker 出现：先处理 blocker，不要用 `force=true` 掩盖问题。
 
 ---
 
-## 15. 多点巡航
+## 17. 多点巡航验证
 
-确认当前点位顺序：
+确认点位顺序：
 
 ```bash
-curl http://127.0.0.1:8080/slam/nav_points
+curl ${ADAPTER_URL}/slam/nav_points
 ```
+
+建议先只用 2 到 3 个低风险点做短路线验证。确认没问题后再增加完整路线。
 
 启动巡航：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/start_cruise \
+curl -X POST ${ADAPTER_URL}/slam/start_cruise \
   -H "Content-Type: application/json" \
   -d '{"force":false}'
 ```
 
-轮询巡航状态：
+轮询状态：
 
 ```bash
-watch -n 1 'curl -s http://127.0.0.1:8080/slam/nav_status'
+watch -n 1 "curl -s ${ADAPTER_URL}/slam/nav_status"
 ```
 
-停止巡航：
+订阅事件流：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/stop_cruise
+curl -N ${ADAPTER_URL}/slam/events
 ```
 
-暂停和恢复：
+暂停、恢复、停止：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/pause_nav
-curl -X POST http://127.0.0.1:8080/slam/resume_nav
+curl -X POST ${ADAPTER_URL}/slam/pause_nav
+curl -X POST ${ADAPTER_URL}/slam/resume_nav
+curl -X POST ${ADAPTER_URL}/slam/stop_cruise
 ```
 
-要求：
+巡航通过标准：
 
-- 巡航按点位顺序执行。
-- `current_nav_index` 正常推进。
-- 到点后 `is_arrived=true` 或事件里出现到达记录。
-- `stop_cruise` 后机器人停止，底层 action 被取消。
+```plain
+current_nav_index 正常推进；
+每个点能按顺序到达；
+stop_cruise 能停止；
+pause/resume 行为符合预期；
+/slam/events 有到点、失败或完成事件；
+机器人实际运动没有明显抖动或危险路径。
+```
 
 ---
 
-## 16. 路线文件巡航
+## 18. 固定路线 patrol / mission
 
-如果要做固定路线，可以用 route/patrol 接口。
-
-创建路线：
+如果要把一组点固化成业务路线，先保存 route：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/routes/upsert \
+curl -X POST ${ADAPTER_URL}/robot/routes/upsert \
   -H "Content-Type: application/json" \
   -d '{
     "route": {
       "name": "showroom_main_v1",
+      "map_name": "showroom_1f_20260429",
       "points": [
         "lobby_01_start",
         "lobby_02_frontdesk",
         "corridor_01_turn"
-      ]
+      ],
+      "meta": {
+        "remark": "main patrol route"
+      }
     }
   }'
+```
+
+查看路线：
+
+```bash
+curl ${ADAPTER_URL}/robot/routes
 ```
 
 启动路线巡航：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/patrol/start \
+curl -X POST ${ADAPTER_URL}/robot/patrol/start \
   -H "Content-Type: application/json" \
-  -d '{"route_name":"showroom_main_v1","force":false}'
+  -d '{"route_name":"showroom_main_v1","map_name":"showroom_1f_20260429","loop":false,"force":false}'
 ```
 
-查看路线巡航状态：
+查看状态：
 
 ```bash
-curl http://127.0.0.1:8080/robot/patrol/status
+curl ${ADAPTER_URL}/robot/patrol/status
 ```
 
 停止：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/patrol/stop
+curl -X POST ${ADAPTER_URL}/robot/patrol/stop
+```
+
+继续下一步条件：
+
+```plain
+route 能保存；
+patrol/start 能启动；
+patrol/status 能看到执行状态；
+patrol/stop 能安全停止。
 ```
 
 ---
 
-## 17. 背包接入前验收
+## 19. 背包接入前验收
 
-背包接入前至少确认：
+背包接入前至少执行下面检查：
 
 ```bash
-curl http://127.0.0.1:8080/slam/status
-curl http://127.0.0.1:8080/slam/nav_points
-curl http://127.0.0.1:8080/slam/nav_status
-curl http://127.0.0.1:8080/robot/readiness
+curl ${ADAPTER_URL}/healthz
+curl ${ADAPTER_URL}/slam/status
+curl ${ADAPTER_URL}/slam/pose
+curl ${ADAPTER_URL}/slam/nav_points
+curl ${ADAPTER_URL}/slam/nav_status
+curl ${ADAPTER_URL}/robot/status
+curl ${ADAPTER_URL}/robot/readiness
+curl ${ADAPTER_URL}/robot/aurora/state
 ```
 
 验收标准：
 
-- `/slam/status` 正常返回。
-- `/slam/nav_points` 有正式点位。
-- `/robot/readiness.ready=true`，或 blocker 原因明确且可接受。
-- Aurora `ensure_stand` 成功。
-- 单点导航成功。
-- 多点巡航成功。
-- `stop_cruise`、`navigation/cancel` 能安全停止。
+```plain
+healthz.ok=true
+ros.ready=true
+aurora.connected=true
+readiness.ready=true
+nav_points.count 与现场点位一致
+单点导航成功
+多点巡航成功
+stop_cruise 和 navigation/cancel 能安全停止
+```
+
+建议记录一次验收结果：
+
+```plain
+日期：
+场地：
+机器人：
+命名空间：GR301AA0025
+地图路径：
+地图名称：
+点位数量：
+路线名称：
+单点验证结果：
+巡航验证结果：
+测试人员：
+遗留问题：
+```
+
+背包侧一般只需要关心兼容接口：
+
+```plain
+GET  /slam/status
+GET  /slam/pose
+POST /slam/relocation
+POST /slam/add_nav_point
+GET  /slam/nav_points
+POST /slam/start_cruise
+POST /slam/stop_cruise
+GET  /slam/nav_status
+GET  /slam/events
+```
 
 ---
 
-## 18. 异常处理
+## 20. 常见异常处理
 
-立即停止巡航：
+### 20.1 立即停止机器人
+
+先停巡航，再取消导航，再停机体运动：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/stop_cruise
-curl -X POST http://127.0.0.1:8080/robot/navigation/cancel
-curl -X POST http://127.0.0.1:8080/robot/aurora/stop_motion
+curl -X POST ${ADAPTER_URL}/slam/stop_cruise
+curl -X POST ${ADAPTER_URL}/robot/navigation/cancel
+curl -X POST ${ADAPTER_URL}/robot/aurora/stop_motion
 ```
 
-AuroraCore 重启后：
+### 20.2 Aurora Agent 状态异常
 
 ```bash
-curl -X POST http://127.0.0.1:8080/robot/aurora/reset
-curl http://127.0.0.1:8080/robot/aurora/state?force_refresh=true
+curl ${AGENT_URL}/health
+curl ${AGENT_URL}/state
+curl ${AGENT_URL}/diagnostics
+curl -X POST ${AGENT_URL}/reset
 ```
 
-定位丢失：
+通过 Adapter 重置：
 
 ```bash
-curl http://127.0.0.1:8080/robot/localization/status
-curl -X POST http://127.0.0.1:8080/slam/relocation \
+curl -X POST ${ADAPTER_URL}/robot/aurora/reset
+curl ${ADAPTER_URL}/robot/aurora/state?force_refresh=true
+```
+
+### 20.3 定位丢失
+
+```bash
+curl ${ADAPTER_URL}/robot/localization/status
+curl -X POST ${ADAPTER_URL}/slam/relocation \
   -H "Content-Type: application/json" \
-  -d "{
-    \"map_path\":\"${MAP_PATH}\",
-    \"x\":0,
-    \"y\":0,
-    \"z\":0,
-    \"yaw\":0,
-    \"wait_for_localization\":true
-  }"
+  -d "{\"map_path\":\"${MAP_PATH}\",\"x\":0,\"y\":0,\"z\":0,\"yaw\":0,\"wait_for_localization\":true}"
 ```
 
-ROS2 接口异常：
+必要时重新发布初始位姿：
 
 ```bash
+curl -X POST ${ADAPTER_URL}/robot/localization/initial_pose \
+  -H "Content-Type: application/json" \
+  -d '{"x":0,"y":0,"z":0,"yaw":0,"frame_id":"map"}'
+```
+
+### 20.4 ROS2 接口异常
+
+```bash
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+
 ros2 service list | grep /GR301AA0025
 ros2 topic list | grep /GR301AA0025
-curl http://127.0.0.1:8080/robot/status
+ros2 action list | grep /GR301AA0025
+curl ${ADAPTER_URL}/robot/status
+```
+
+### 20.5 RViz 看不到地图或 TF
+
+确认 RViz 是用脚本或带 remap 命令启动的：
+
+```bash
+./scripts/open_rviz.sh mapping
+./scripts/open_rviz.sh relocation
+```
+
+检查 topic：
+
+```bash
+ros2 topic list | egrep "/GR301AA0025/(map|scan|tf|tf_static|odom)"
+```
+
+Fixed Frame 使用 `map`，不要改成 `/GR301AA0025/map`。
+
+如果 Map 左侧状态报红，并且终端里有下面这类报错：
+
+```plain
+GLSL link result:
+active samplers with a different type refer to the same texture image unit
+```
+
+这通常是 RViz Map 插件和显卡 OpenGL 驱动的渲染兼容问题，不是命名空间或 Adapter 状态问题。优先用脚本启动，脚本会默认启用软件渲染：
+
+```bash
+./scripts/open_rviz.sh mapping
+```
+
+如果手动启动，命令前加：
+
+```bash
+LIBGL_ALWAYS_SOFTWARE=1 QT_X11_NO_MITSHM=1 rviz2 -d rviz/mapping_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static
 ```
 
 ---
 
-## 19. 收尾和关机
+## 21. 收尾和关机
 
 停止巡航和运动：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/stop_cruise
-curl -X POST http://127.0.0.1:8080/robot/aurora/stop_motion
+curl -X POST ${ADAPTER_URL}/slam/stop_cruise
+curl -X POST ${ADAPTER_URL}/robot/navigation/cancel
+curl -X POST ${ADAPTER_URL}/robot/aurora/stop_motion
 ```
 
 保存点位：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/save_nav_points
+curl -X POST ${ADAPTER_URL}/slam/save_nav_points
 ```
 
-记录现场信息：
+保存现场记录：
 
 ```plain
 日期：
@@ -756,43 +1182,62 @@ curl -X POST http://127.0.0.1:8080/slam/save_nav_points
 
 ---
 
-## 20. 一页命令速查
+## 22. 一页命令速查
 
 ```bash
+# 常用变量
+export PROJECT_DIR=~/aurora_ws/flyAdapter
+export NS=/GR301AA0025
+export ADAPTER_URL=http://127.0.0.1:8080
+export AGENT_URL=http://127.0.0.1:18080
+export MAP_NAME=showroom_1f_20260429
+export MAP_PATH=/opt/fftai/nav/maps/${MAP_NAME}
+
 # 状态
-curl http://127.0.0.1:8080/slam/status
-curl http://127.0.0.1:8080/robot/readiness
+curl ${ADAPTER_URL}/healthz
+curl ${ADAPTER_URL}/slam/status
+curl ${ADAPTER_URL}/robot/readiness
+curl ${ADAPTER_URL}/robot/status
 
 # RViz
+cd ${PROJECT_DIR}
 ./scripts/open_rviz.sh mapping
 ./scripts/open_rviz.sh relocation
 
 # 建图
-curl -X POST http://127.0.0.1:8080/slam/start_mapping
-curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
+curl -X POST ${ADAPTER_URL}/slam/start_mapping
+curl -X POST ${ADAPTER_URL}/slam/stop_mapping \
   -H "Content-Type: application/json" \
   -d "{\"map_path\":\"${MAP_PATH}\"}"
 
 # 定位
-curl -X POST http://127.0.0.1:8080/slam/relocation \
+curl -X POST ${ADAPTER_URL}/slam/relocation \
   -H "Content-Type: application/json" \
-  -d "{\"map_path\":\"${MAP_PATH}\",\"wait_for_localization\":true}"
+  -d "{\"map_path\":\"${MAP_PATH}\",\"x\":0,\"y\":0,\"z\":0,\"yaw\":0,\"wait_for_localization\":true}"
 
 # 打点
-curl -X POST http://127.0.0.1:8080/slam/add_nav_point \
+export POINT_NAME=lobby_01_start
+curl -X POST ${ADAPTER_URL}/slam/add_nav_point \
   -H "Content-Type: application/json" \
-  -d '{"name":"lobby_01_start"}'
-curl -X POST http://127.0.0.1:8080/slam/save_nav_points
+  -d "{\"name\":\"${POINT_NAME}\"}"
+curl -X POST ${ADAPTER_URL}/slam/save_nav_points
+curl ${ADAPTER_URL}/slam/nav_points
 
 # 单点导航
-curl -X POST http://127.0.0.1:8080/robot/navigation/goto_poi \
+curl -X POST ${ADAPTER_URL}/robot/navigation/goto_poi \
   -H "Content-Type: application/json" \
   -d '{"name":"lobby_01_start","force":false}'
 
 # 巡航
-curl -X POST http://127.0.0.1:8080/slam/start_cruise \
+curl -X POST ${ADAPTER_URL}/slam/start_cruise \
   -H "Content-Type: application/json" \
   -d '{"force":false}'
-curl http://127.0.0.1:8080/slam/nav_status
-curl -X POST http://127.0.0.1:8080/slam/stop_cruise
+curl ${ADAPTER_URL}/slam/nav_status
+curl -N ${ADAPTER_URL}/slam/events
+curl -X POST ${ADAPTER_URL}/slam/stop_cruise
+
+# 急停式接口停止
+curl -X POST ${ADAPTER_URL}/slam/stop_cruise
+curl -X POST ${ADAPTER_URL}/robot/navigation/cancel
+curl -X POST ${ADAPTER_URL}/robot/aurora/stop_motion
 ```

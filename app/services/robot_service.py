@@ -50,6 +50,8 @@ class RobotService:
     def legacy_status(self) -> dict[str, Any]:
         snap = self.state.snapshot()
         aurora = self.aurora.state()
+        navigation_readiness = self.readiness(snap=snap, aurora=aurora)
+        mapping_readiness = self.mapping_readiness(snap=snap, aurora=aurora)
         status = {
             "status": "running",
             "is_cruising": snap["is_cruising"],
@@ -62,10 +64,12 @@ class RobotService:
             "slam_mode": snap["slam_mode"],
             "odom_status_code": snap["odom_status_code"],
             "odom_status_score": snap["odom_status_score"],
-            "localization_status": RuntimeState.localization_status_from_code(snap["odom_status_code"]),
+            "localization_status": self._localization_status_for_display(snap),
             "last_error": snap["last_error"],
         }
-        status["ready_for_navigation"] = self.readiness(snap=snap, aurora=aurora)["ready"]
+        status["ready_for_mapping"] = mapping_readiness["ready"]
+        status["ready_for_navigation"] = navigation_readiness["ready"]
+        status["mapping_readiness"] = mapping_readiness
         status["aurora"] = aurora
         status["ros"] = self.ros.diagnostics()
         return status
@@ -79,6 +83,7 @@ class RobotService:
             "aurora": aurora,
             "runtime": snap,
             "readiness": self.readiness(snap=snap, aurora=aurora),
+            "mapping_readiness": self.mapping_readiness(snap=snap, aurora=aurora),
         }
 
     def get_pose(self) -> dict[str, Any]:
@@ -92,10 +97,11 @@ class RobotService:
             "pose": snap["pose"],
             "pose_age_sec": snap["pose_age_sec"],
             "odom_status_code": snap["odom_status_code"],
-            "odom_status": RuntimeState.localization_status_from_code(snap["odom_status_code"]),
+            "odom_status": self._localization_status_for_display(snap),
             "odom_status_score": snap["odom_status_score"],
             "odom_status_age_sec": snap["odom_status_age_sec"],
             "health": snap["health"],
+            "mapping_readiness": self.mapping_readiness(snap=snap),
             "ready": self.readiness(snap=snap)["ready"],
         }
 
@@ -148,6 +154,60 @@ class RobotService:
                 "ros_ready": self.ros.ready,
                 "map_loaded": bool(snap["current_map"]),
                 "localization_good": snap["odom_status_code"] == 2,
+                "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
+                "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
+                "aurora_connected": aurora_connected,
+                "aurora_standing_known": aurora_standing_known,
+                "robot_standing": aurora_standing,
+            },
+        }
+
+    def mapping_readiness(self, snap: dict[str, Any] | None = None, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
+        snap = snap or self.state.snapshot()
+        aurora = aurora or self.aurora.state()
+        blockers: list[str] = []
+        warnings: list[str] = []
+
+        if not self.ros.available:
+            blockers.append("ros_python_unavailable")
+        elif not self.ros.ready:
+            blockers.append("ros_bridge_not_ready")
+
+        if not self._is_mapping_mode(snap["slam_mode"]):
+            blockers.append("not_in_mapping_mode")
+        if snap["pose_age_sec"] is None or snap["pose_age_sec"] > 3.0:
+            blockers.append("robot_pose_not_fresh")
+        if snap["health"].get("has_error") or snap["health"].get("has_fatal"):
+            blockers.append("health_error")
+
+        aurora_connected = bool(aurora.get("connected"))
+        aurora_standing = bool(aurora.get("standing"))
+        aurora_standing_known = bool(aurora.get("standing_known", "standing" in aurora))
+        if self.config.require_aurora:
+            if not aurora_connected:
+                blockers.append("aurora_unavailable")
+            elif aurora_standing_known and not aurora_standing:
+                blockers.append("robot_not_standing")
+            elif not aurora_standing_known:
+                warnings.append("aurora_standing_unknown")
+        elif not aurora_connected:
+            warnings.append("aurora_unavailable")
+        elif aurora_standing_known and not aurora_standing:
+            warnings.append("robot_not_standing")
+        elif not aurora_standing_known:
+            warnings.append("aurora_standing_unknown")
+
+        if snap["odom_status_code"] is None:
+            warnings.append("odom_status_not_published_in_mapping")
+
+        return {
+            "ready": not blockers,
+            "blockers": blockers,
+            "warnings": warnings,
+            "checks": {
+                "ros_available": self.ros.available,
+                "ros_ready": self.ros.ready,
+                "mapping_mode": self._is_mapping_mode(snap["slam_mode"]),
                 "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
                 "aurora_connected": aurora_connected,
@@ -396,6 +456,15 @@ class RobotService:
         self.state.set_current_action(result)
         return {"ros": result, "cached": self.state.snapshot()["current_action"], "action_status": self.state.snapshot()["action_status"]}
 
+    @staticmethod
+    def _is_mapping_mode(mode: Any) -> bool:
+        return str(mode or "").strip().lower() in {"mapping", "map", "0"}
+
+    def _localization_status_for_display(self, snap: dict[str, Any]) -> str:
+        if self._is_mapping_mode(snap["slam_mode"]) and snap["odom_status_code"] is None:
+            return "NOT_REQUIRED_IN_MAPPING"
+        return RuntimeState.localization_status_from_code(snap["odom_status_code"])
+
     def _cruise_loop(self, points: list[dict[str, Any]]) -> None:
         while not self._cruise_stop.is_set() and self.state.current_nav_index < len(points):
             while self._cruise_pause.is_set() and not self._cruise_stop.is_set():
@@ -430,8 +499,7 @@ class RobotService:
     def _safe_ros_call(self, fn: Any, action_name: str) -> dict[str, Any]:
         try:
             result = fn()
-            status_code = int(result.get("result", result.get("status", 0)) or 0)
-            self.state.status_code = status_code
+            self.state.status_code = self._status_code_from_result(result)
             self.state.last_error = None
             return result
         except BridgeUnavailable as exc:
@@ -440,6 +508,28 @@ class RobotService:
         except Exception as exc:
             self.state.mark_error(str(exc), status_code=-1)
             return {"success": False, "message": str(exc), "action": action_name, "status_code": -1}
+
+    @staticmethod
+    def _status_code_from_result(result: dict[str, Any]) -> int:
+        if result.get("success") is False or result.get("accepted") is False:
+            for key in ("status_code", "result", "status"):
+                value = result.get(key)
+                if value is None:
+                    continue
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return -1
+            return -1
+        value = result.get("status_code")
+        if value is not None:
+            try:
+                code = int(value)
+                if code < 0:
+                    return code
+            except (TypeError, ValueError):
+                return -1
+        return 0
 
 
 def point_to_pose_in(point: dict[str, Any]) -> dict[str, Any]:

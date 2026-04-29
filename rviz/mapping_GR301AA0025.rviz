@@ -63,7 +63,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /GR301AA0025/map
-      Update Topic: ""
+      Update Topic: /GR301AA0025/map_updates
       Use Timestamp: false
       Value: true
     - Alpha: 1
