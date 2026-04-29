@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 import threading
 import time
@@ -74,6 +75,7 @@ class AuroraSdkController:
             "standing": bool(state.get("standing")),
             "error": state.get("error"),
             "import_attempts": list(self._import_attempts),
+            "module_diagnostics": self._module_diagnostics(),
             "updated_at_ms": state.get("updated_at_ms"),
         }
 
@@ -176,6 +178,7 @@ class AuroraSdkController:
                 "standing": self._is_standing(raw, fsm_state),
                 "raw": raw,
                 "import_attempts": list(self._import_attempts),
+                "module_diagnostics": self._module_diagnostics(),
                 "updated_at_ms": now_ms(),
             }
             with self._lock:
@@ -216,6 +219,14 @@ class AuroraSdkController:
 
         errors: list[str] = []
         self._import_attempts = []
+        diagnostics = self._module_diagnostics()
+        aurora_cmd = diagnostics.get("fourier_msgs.msg.AuroraCmd", {})
+        if not aurora_cmd.get("found"):
+            self._import_attempts.append(
+                "fourier_msgs.msg.AuroraCmd: missing; "
+                f"fourier_msgs={diagnostics.get('fourier_msgs', {}).get('origin')}; "
+                "hint=run Aurora Agent outside HumanoidNav overlay or set AURORA_SETUP_SCRIPT to Aurora SDK setup"
+            )
         seen: set[tuple[str, str]] = set()
         for module_name, class_name in candidates:
             key = (module_name, class_name)
@@ -329,12 +340,28 @@ class AuroraSdkController:
             "standing": False,
             "error": message,
             "import_attempts": list(self._import_attempts),
+            "module_diagnostics": self._module_diagnostics(),
             "updated_at_ms": now_ms(),
         }
 
     @staticmethod
     def _elapsed_ms(start: float) -> int:
         return int((time.monotonic() - start) * 1000)
+
+    @staticmethod
+    def _module_diagnostics() -> dict[str, Any]:
+        diagnostics: dict[str, Any] = {}
+        for name in ("fourier_msgs", "fourier_msgs.msg", "fourier_msgs.msg.AuroraCmd"):
+            try:
+                spec = importlib.util.find_spec(name)
+                diagnostics[name] = {
+                    "found": spec is not None,
+                    "origin": None if spec is None else str(spec.origin or spec.submodule_search_locations),
+                }
+            except Exception as exc:
+                diagnostics[name] = {"found": False, "error": str(exc)}
+        diagnostics["sys_path_head"] = list(sys.path[:12])
+        return diagnostics
 
 
 config = load_config()

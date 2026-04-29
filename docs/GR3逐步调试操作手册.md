@@ -414,7 +414,7 @@ curl http://127.0.0.1:18080/health
 }
 ```
 
-结论是：Agent 所在环境仍不是正确的 Aurora SDK 环境。此时不要改主 Adapter，要把 Agent 放到能正确 import Aurora SDK 和 `AuroraCmd` 消息的环境里。
+结论是：Agent 所在环境仍不是正确的 Aurora SDK 环境。此时不要改主 Adapter，要把 Agent 放到能正确 import Aurora SDK 和 `AuroraCmd` 消息的环境里。当前脚本会默认清理继承来的 HumanoidNav overlay；如果清理后仍失败，看 Agent `/health` 里的 `module_diagnostics`，确认 `fourier_msgs` 实际加载路径是不是还指向 HumanoidNav。
 
 Aurora Agent 启动参数：
 
@@ -424,6 +424,7 @@ export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
 export AURORA_CLIENT_CLASS=AuroraClient
 export AURORA_STAND_FSM_STATE=2
+export AURORA_ENV_CLEAN=1
 ```
 
 如果现场 Aurora SDK 只能在 `fourier_aurora_server` 容器里使用，就在容器里启动 Agent，而不是把主 Adapter 放进去：

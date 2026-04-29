@@ -34,11 +34,14 @@ class AuroraBridge:
 
     @property
     def backend(self) -> str:
+        configured = self.config.aurora_backend or "agent"
         if not self.config.aurora_enabled:
             return "disabled"
-        if self.config.aurora_mock:
+        if self.config.aurora_mock or configured == "mock":
             return "mock"
-        return self.config.aurora_backend or "agent"
+        if configured == "disabled":
+            return "disabled"
+        return configured
 
     def start(self) -> None:
         if self.backend in {"disabled", "mock"}:
@@ -234,7 +237,7 @@ class AuroraBridge:
             "error": data.get("error"),
             "message": data.get("message"),
         }
-        for key in ("domain_id", "robot_name", "elapsed_ms", "args", "duration", "state"):
+        for key in ("domain_id", "robot_name", "elapsed_ms", "args", "duration", "state", "import_attempts"):
             if key in data:
                 normalized[key] = data[key]
         return {key: value for key, value in normalized.items() if value is not None}
@@ -281,7 +284,7 @@ class AuroraBridge:
                 "standing": False,
                 "error": "Aurora is disabled",
             }
-        if self.config.aurora_mock:
+        if self.config.aurora_mock or self.backend == "mock":
             return {
                 "available": True,
                 "connected": True,

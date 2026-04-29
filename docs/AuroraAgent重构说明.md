@@ -62,3 +62,5 @@ curl http://127.0.0.1:8080/robot/readiness
 ```
 
 如果 Agent 提示缺少 `fourier_msgs.msg.AuroraCmd`，说明 Agent 所在环境不是完整 Aurora SDK 环境；此时不要改主 Adapter，应该把 Agent 移到正确环境或容器里运行。
+
+`scripts/run_aurora_agent.sh` 默认会执行 `AURORA_ENV_CLEAN=1`，自动从 `PYTHONPATH`、`AMENT_PREFIX_PATH`、`LD_LIBRARY_PATH` 等变量里移除 `humanoidnav` 路径，防止导航版 `fourier_msgs` 覆盖 Aurora SDK 消息。`/health` 响应里的 `module_diagnostics` 会显示 `fourier_msgs` 和 `AuroraCmd` 的实际加载位置。
