@@ -64,3 +64,5 @@ chmod +x scripts/run_aurora_agent.sh
 - `docs/AuroraAgent重构说明.md`
 - `docs/GR3接口文档.md`
 - `docs/GR3逐步调试操作手册.md`
+- `docs/GR3端到端逐步测试指南.md`
+- `docs/GR3开机建图打点巡航标准流程.md`
