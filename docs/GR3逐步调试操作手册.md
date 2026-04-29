@@ -165,7 +165,7 @@ ros2 topic list | egrep "$NS/(robot_pose|odom|odom_status_code|odom_status_score
 终端四：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -214,7 +214,7 @@ ROS2 Python imports unavailable: No module named 'numpy'
 说明 HumanoidNav 底层已经可能起来了，但 adapter 当前 `.venv` 里缺 ROS2 Python 消息依赖需要的 `numpy`。处理方式：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 source .venv/bin/activate
 pip install -r requirements.txt
 python -c "import numpy; print(numpy.__version__)"
@@ -318,7 +318,7 @@ ros2 topic echo /GR301AA0025/odom_status_code 显示 data: 1
 处理顺序：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 source .venv/bin/activate
 pip install -r requirements.txt
 python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"

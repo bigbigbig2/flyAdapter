@@ -23,7 +23,7 @@ GR301AA0025
 终端 4：GR3 Adapter / curl 测试
 ```
 
-如果工程实际目录不是 `~/aurora_ws/gr3`，把下面命令里的目录替换成现场真实目录。不要在 `cd` 失败后继续执行。
+如果工程实际目录不是 `~/aurora_ws/flyAdapter`，把下面命令里的目录替换成现场真实目录。不要在 `cd` 失败后继续执行。
 
 ---
 
@@ -121,7 +121,7 @@ timeout 5s ros2 topic echo /GR301AA0025/slam/mode_status --once
 终端 3：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
@@ -179,7 +179,7 @@ curl -X POST http://127.0.0.1:18080/reset
 终端 4：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate

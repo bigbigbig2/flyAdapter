@@ -44,7 +44,7 @@ Agent 对 Aurora SDK 的调用只集中在 `app/aurora_sdk_runtime.py`：
 Aurora Agent 在 SDK 环境里启动：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
@@ -56,7 +56,7 @@ export AURORA_STAND_FSM_STATE=2
 GR3 Adapter 在 HumanoidNav/ROS2 环境里启动：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 export ROBOT_NAMESPACE=GR301AA0025

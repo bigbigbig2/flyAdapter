@@ -106,7 +106,7 @@ ping -c 3 127.0.0.1
 进入工程目录：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 ```
 
 如果这个目录不存在，不要继续执行。先确认工程部署位置。
@@ -172,7 +172,7 @@ source /opt/fftai/humanoidnav/install/setup.bash
 终端 3：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
@@ -208,7 +208,7 @@ curl http://127.0.0.1:18080/state
 终端 4：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -290,7 +290,7 @@ ready_for_navigation=false
 开始建图后，另开一个有图形环境的终端启动建图可视化：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 chmod +x scripts/open_rviz.sh
 ./scripts/open_rviz.sh mapping
 ```
@@ -298,7 +298,7 @@ chmod +x scripts/open_rviz.sh
 等价完整命令：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
@@ -419,7 +419,7 @@ curl http://127.0.0.1:8080/robot/readiness
 地图加载后，另开一个有图形环境的终端启动定位可视化：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 chmod +x scripts/open_rviz.sh
 ./scripts/open_rviz.sh relocation
 ```
@@ -427,7 +427,7 @@ chmod +x scripts/open_rviz.sh
 等价完整命令：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 

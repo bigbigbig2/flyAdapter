@@ -11,7 +11,7 @@ GR301AA0025
 ## 运行
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -31,7 +31,7 @@ chmod +x scripts/run_adapter.sh
 Aurora SDK 不在主 Adapter 进程里 import。需要在 Aurora SDK 正确环境或容器里另起一个常驻 Agent：
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client

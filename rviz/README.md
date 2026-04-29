@@ -5,7 +5,7 @@
 ## 建图
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 ./scripts/open_rviz.sh mapping
 ```
 
@@ -25,7 +25,7 @@ rviz/mapping_GR301AA0025.rviz
 ## 定位 / 重定位
 
 ```bash
-cd ~/aurora_ws/gr3 || exit 1
+cd ~/aurora_ws/flyAdapter || exit 1
 ./scripts/open_rviz.sh relocation
 ```
 
