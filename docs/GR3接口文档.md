@@ -229,6 +229,10 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 通过 Aurora Agent 停止机体运动。
 
+### POST `/robot/aurora/reset`
+
+重置 Aurora Agent 内部的 `AuroraClient` 和连接退避状态。适用于 AuroraCore 重启、`DomainID`/`RobotName` 修正、容器网络修正后，不想重启主 Adapter 的场景。
+
 ### POST `/robot/map/load`
 
 直接按路径加载地图。

@@ -97,6 +97,8 @@ class AuroraBridge:
             if now - last_success_s > self.config.aurora_state_stale_sec:
                 state["connected"] = False
                 state["standing"] = False
+                state["standing_known"] = False
+                state["agent_reachable"] = False
                 state["stale"] = True
                 state["error"] = "Aurora state cache stale"
         else:
@@ -124,6 +126,25 @@ class AuroraBridge:
             return {"success": True, "message": "mock stop_motion", "backend": "mock"}
         return self._command("stop_motion", {"duration": float(duration)})
 
+    def reset(self) -> dict[str, Any]:
+        if self.backend in {"disabled", "mock"}:
+            return self._current_non_agent_state()
+        if self.backend != "agent":
+            return self._unavailable_state(f"unsupported Aurora backend: {self.backend}", operation="reset", success=False)
+        try:
+            result = self._request_json("POST", "/reset", {}, self.config.aurora_command_timeout_sec)
+            with self._lock:
+                self._failure_count = 0
+                self._circuit_until_s = 0.0
+                self._last_success_s = None
+                self._last_refresh_s = time.monotonic()
+                self._state = self._initial_state()
+            return self._normalize_agent_payload(result, operation="reset", success_default=True)
+        except Exception as exc:
+            message = str(exc)
+            self._record_failure(message)
+            return self._unavailable_state(message, operation="reset", success=False)
+
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
             self._refresh_state()
@@ -145,15 +166,26 @@ class AuroraBridge:
             return state
         except Exception as exc:
             message = str(exc)
-            self._record_failure(message)
+            now = time.monotonic()
             with self._lock:
-                state = dict(self._state)
-                state["agent_reachable"] = False
-                state["last_error"] = message
-                if self._last_success_s is None:
-                    state.update(self._unavailable_state(message, operation="state"))
+                last_success_s = self._last_success_s
+            stale = last_success_s is None or now - last_success_s > self.config.aurora_state_stale_sec
+            if stale:
+                self._record_failure(message)
+            else:
+                message = f"{message}; keeping recent Aurora cache"
+            with self._lock:
+                if stale:
+                    state = self._unavailable_state(message, operation="state")
+                    state["stale"] = True
+                else:
+                    state = dict(self._state)
+                    state["agent_reachable"] = True
+                    state["last_error"] = message
+                    state["transient_error"] = message
+                    state["stale"] = False
                 self._state = state
-                self._last_refresh_s = time.monotonic()
+                self._last_refresh_s = now
                 return dict(self._state)
 
     def _command(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -174,7 +206,7 @@ class AuroraBridge:
                 self._record_success()
                 if isinstance(result, dict):
                     state_candidate = result.get("state") if isinstance(result.get("state"), dict) else result
-                    if any(key in state_candidate for key in ("fsm_state", "standing", "connected")):
+                    if any(key in state_candidate for key in ("fsm_state", "fsm_name", "standing", "connected")):
                         with self._lock:
                             self._state = self._normalize_agent_payload(state_candidate, operation=operation)
                             self._last_success_s = time.monotonic()
@@ -219,7 +251,10 @@ class AuroraBridge:
         data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
         success = data.get("success", success_default)
         fsm_state = data.get("fsm_state")
-        standing = bool(data.get("standing", False))
+        raw_standing = data.get("standing")
+        standing_known = bool(data.get("standing_known", raw_standing is not None))
+        standing = bool(raw_standing) if raw_standing is not None else False
+        state_known = bool(data.get("state_known", data.get("state_getter") is not None))
         connected = bool(data.get("connected", data.get("available", False)))
         normalized = {
             "success": success,
@@ -231,13 +266,32 @@ class AuroraBridge:
             "agent_reachable": True,
             "fsm_state": fsm_state,
             "standing": standing,
+            "standing_known": standing_known,
+            "state_known": state_known,
+            "state_getter": data.get("state_getter"),
             "operation": data.get("operation", operation),
             "updated_at_ms": data.get("updated_at_ms", now_ms()),
             "raw": data.get("raw"),
             "error": data.get("error"),
             "message": data.get("message"),
         }
-        for key in ("domain_id", "robot_name", "elapsed_ms", "args", "duration", "state", "import_attempts"):
+        for key in (
+            "domain_id",
+            "robot_name",
+            "fsm_name",
+            "elapsed_ms",
+            "args",
+            "duration",
+            "state",
+            "import_attempts",
+            "module_diagnostics",
+            "sdk_capabilities",
+            "connect_retry_after_sec",
+            "connect_failure_count",
+            "last_connect_error",
+            "last_error",
+            "transient_error",
+        ):
             if key in data:
                 normalized[key] = data[key]
         return {key: value for key, value in normalized.items() if value is not None}
@@ -268,6 +322,11 @@ class AuroraBridge:
             "mock": False,
             "backend": "agent",
             "agent_url": self.config.aurora_agent_url,
+            "agent_reachable": False,
+            "fsm_state": None,
+            "standing": False,
+            "standing_known": False,
+            "state_known": False,
             "operation": operation,
             "error": "Aurora agent circuit is open",
             "retry_after_sec": round(retry_after, 3),
@@ -282,6 +341,8 @@ class AuroraBridge:
                 "backend": "disabled",
                 "fsm_state": None,
                 "standing": False,
+                "standing_known": False,
+                "state_known": False,
                 "error": "Aurora is disabled",
             }
         if self.config.aurora_mock or self.backend == "mock":
@@ -292,6 +353,8 @@ class AuroraBridge:
                 "backend": "mock",
                 "fsm_state": self._mock_fsm_state,
                 "standing": self._mock_fsm_state in {1, 2, self.config.aurora_stand_fsm_state},
+                "standing_known": True,
+                "state_known": True,
                 "updated_at_ms": now_ms(),
             }
         return self._unavailable_state(f"unsupported Aurora backend: {self.backend}")
@@ -308,6 +371,8 @@ class AuroraBridge:
             "agent_reachable": False,
             "fsm_state": None,
             "standing": False,
+            "standing_known": False,
+            "state_known": False,
             "stale": True,
             "error": "Aurora agent state not received yet",
         }
@@ -328,6 +393,8 @@ class AuroraBridge:
             "agent_reachable": False,
             "fsm_state": None,
             "standing": False,
+            "standing_known": False,
+            "state_known": False,
             "operation": operation,
             "error": message,
         }

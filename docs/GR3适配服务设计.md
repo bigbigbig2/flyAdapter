@@ -210,7 +210,7 @@ source /opt/fftai/humanoidnav/install/setup.bash
 3. 启动 Aurora Agent。这个进程放在 Aurora SDK 正确环境或容器里运行，不要求 source HumanoidNav：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
@@ -223,7 +223,7 @@ export AURORA_STAND_FSM_STATE=2
 4. 启动适配服务：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 source .venv/bin/activate
 pip install -r requirements.txt
 source /opt/ros/humble/setup.bash

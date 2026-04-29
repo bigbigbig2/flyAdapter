@@ -123,15 +123,22 @@ class RobotService:
         if snap["is_cruising"] or snap["navigation_task"].get("status") in {"running", "executing"}:
             warnings.append("navigation_task_active")
 
+        aurora_connected = bool(aurora.get("connected"))
+        aurora_standing = bool(aurora.get("standing"))
+        aurora_standing_known = bool(aurora.get("standing_known", "standing" in aurora))
         if self.config.require_aurora:
-            if not aurora.get("connected"):
+            if not aurora_connected:
                 blockers.append("aurora_unavailable")
-            elif not aurora.get("standing"):
+            elif aurora_standing_known and not aurora_standing:
                 blockers.append("robot_not_standing")
-        elif not aurora.get("connected"):
+            elif not aurora_standing_known:
+                warnings.append("aurora_standing_unknown")
+        elif not aurora_connected:
             warnings.append("aurora_unavailable")
-        elif not aurora.get("standing"):
+        elif aurora_standing_known and not aurora_standing:
             warnings.append("robot_not_standing")
+        elif not aurora_standing_known:
+            warnings.append("aurora_standing_unknown")
         return {
             "ready": not blockers,
             "blockers": blockers,
@@ -143,8 +150,9 @@ class RobotService:
                 "localization_good": snap["odom_status_code"] == 2,
                 "pose_fresh": snap["pose_age_sec"] is not None and snap["pose_age_sec"] <= 3.0,
                 "health_ok": not snap["health"].get("has_error") and not snap["health"].get("has_fatal"),
-                "aurora_connected": bool(aurora.get("connected")),
-                "robot_standing": bool(aurora.get("standing")),
+                "aurora_connected": aurora_connected,
+                "aurora_standing_known": aurora_standing_known,
+                "robot_standing": aurora_standing,
             },
         }
 

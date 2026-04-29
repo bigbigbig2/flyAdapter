@@ -165,7 +165,7 @@ ros2 topic list | egrep "$NS/(robot_pose|odom|odom_status_code|odom_status_score
 终端四：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -214,7 +214,7 @@ ROS2 Python imports unavailable: No module named 'numpy'
 说明 HumanoidNav 底层已经可能起来了，但 adapter 当前 `.venv` 里缺 ROS2 Python 消息依赖需要的 `numpy`。处理方式：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 source .venv/bin/activate
 pip install -r requirements.txt
 python -c "import numpy; print(numpy.__version__)"
@@ -318,7 +318,7 @@ ros2 topic echo /GR301AA0025/odom_status_code 显示 data: 1
 处理顺序：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 source .venv/bin/activate
 pip install -r requirements.txt
 python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
@@ -431,10 +431,40 @@ export AURORA_ENV_CLEAN=1
 
 ```bash
 sudo docker exec -it fourier_aurora_server bash
-cd /workspace/gr3   # 或现场实际挂载的 gr3 目录
+cd /workspace/gr3 || exit 1   # 或现场实际挂载的 gr3 目录
 export PYTHONPATH=$PWD:$PYTHONPATH
 python -c "from fourier_aurora_client import AuroraClient; print(AuroraClient)"
 ./scripts/run_aurora_agent.sh
+```
+
+如果日志已经能找到：
+
+```plain
+fourier_msgs.msg.AuroraCmd: /usr/local/lib/python3.10/dist-packages/...
+fourier_aurora_client.AuroraClient: ok
+```
+
+但随后出现：
+
+```plain
+Timeout waiting for subscribers to be matched, please check if AuroraCore is running
+Unmatched subscriber: rt/aurora_state
+```
+
+这说明 Python SDK 环境已经对了，失败点在 DDS 匹配：Agent 的 `AuroraClient.get_instance(...)` 没匹配到 AuroraCore 的发布者。优先检查：
+
+```bash
+grep -E "DomainID|RobotName|RunType" /workspace/config/config.yaml
+echo "$AURORA_DOMAIN_ID $AURORA_ROBOT_NAME"
+```
+
+`DomainID`、`RobotName` 必须和 Agent 的 `AURORA_DOMAIN_ID`、`AURORA_ROBOT_NAME` 完全一致。如果 AuroraCore 在 docker 容器里，Agent 也建议放进同一个容器启动；宿主机启动 Agent 时，容器网络/DDS 发现可能匹配不到。
+
+修正 AuroraCore 或 DDS 参数后，不需要重启主 Adapter，可以先重置 Agent 客户端：
+
+```bash
+curl -X POST http://127.0.0.1:8080/robot/aurora/reset
+curl http://127.0.0.1:8080/robot/aurora/state?force_refresh=true
 ```
 
 Agent 启动后重测 Adapter：

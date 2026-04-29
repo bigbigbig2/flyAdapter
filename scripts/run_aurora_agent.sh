@@ -68,6 +68,7 @@ fi
 
 export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
 
+echo "[aurora-agent] root=${ROOT_DIR}"
 echo "[aurora-agent] robot=${AURORA_ROBOT_NAME:-gr3v233} domain=${AURORA_DOMAIN_ID:-123}"
 echo "[aurora-agent] module=${AURORA_CLIENT_MODULE:-fourier_aurora_client} class=${AURORA_CLIENT_CLASS:-AuroraClient}"
 python - <<'PY' || true

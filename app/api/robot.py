@@ -295,3 +295,9 @@ def aurora_ensure_stand(request: Request) -> dict:
 def aurora_stop_motion(request: Request) -> dict:
     """通过 Aurora Agent 调用停止运动能力，常作为导航取消后的安全兜底。"""
     return service(request).aurora.stop_motion()
+
+
+@router.post("/aurora/reset", summary="重置 Aurora Agent SDK 客户端")
+def aurora_reset(request: Request) -> dict:
+    """AuroraCore 重启或 DDS 参数修正后调用，清掉 Agent 内部 AuroraClient 和退避状态。"""
+    return service(request).aurora.reset()

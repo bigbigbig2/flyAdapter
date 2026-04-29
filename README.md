@@ -11,7 +11,7 @@ GR301AA0025
 ## 运行
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -31,10 +31,11 @@ chmod +x scripts/run_adapter.sh
 Aurora SDK 不在主 Adapter 进程里 import。需要在 Aurora SDK 正确环境或容器里另起一个常驻 Agent：
 
 ```bash
-cd ~/aurora_ws/gr3
+cd ~/aurora_ws/gr3 || exit 1
 export AURORA_DOMAIN_ID=123
 export AURORA_ROBOT_NAME=gr3v233
 export AURORA_CLIENT_MODULE=fourier_aurora_client
+export AURORA_CLIENT_CLASS=AuroraClient
 export AURORA_STAND_FSM_STATE=2
 
 chmod +x scripts/run_aurora_agent.sh
@@ -52,8 +53,10 @@ chmod +x scripts/run_aurora_agent.sh
 - 外部兼容层：`/slam/...`、`/audio/...`
 - 内部调试层：`/robot/...`
 - ROS2 桥接：HumanoidNav 的 topic/service/action
-- Aurora 桥接：主 Adapter 只调用本地 Aurora Agent；Agent 独立运行在能 import Aurora SDK 的环境里，负责站立、FSM、停止运动和状态缓存
+- Aurora 桥接：主 Adapter 只调用本地 Aurora Agent；Agent 独立运行在能 import Aurora SDK 且能 DDS 匹配 AuroraCore 的环境里，负责站立、FSM、停止运动和状态缓存
 - 本地数据：导航点、巡航文件、runtime 状态
+
+如果 Agent 能 import `fourier_aurora_client`，但日志报 `Timeout waiting for subscribers to be matched`，优先检查 AuroraCore 是否运行、`DomainID`/`RobotName` 是否一致，以及 Agent 和 AuroraCore 是否在同一个容器/DDS 网络里。
 
 详见：
 
