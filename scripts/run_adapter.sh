@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+
+set +u
 
 if [ -f "/opt/ros/humble/setup.bash" ]; then
   source /opt/ros/humble/setup.bash
