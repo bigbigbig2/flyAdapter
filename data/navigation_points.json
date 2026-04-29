@@ -1,0 +1,38 @@
+{
+  "map_file": "/opt/fftai/nav/map",
+  "initial_pose": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 0.0,
+    "q_x": 0.0,
+    "q_y": 0.0,
+    "q_z": 0.0,
+    "q_w": 1.0
+  },
+  "navigation_points": [
+    {
+      "name": "test1",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "q_x": 0.0,
+      "q_y": 0.0,
+      "q_z": 0.0,
+      "q_w": 1.0,
+      "map_name": null,
+      "frame_id": "map",
+      "tags": [],
+      "meta": {}
+    },
+    {
+      "name": "test1",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "q_x": 0.0,
+      "q_y": 0.0,
+      "q_z": 0.0,
+      "q_w": 1.0
+    }
+  ]
+}
