@@ -337,6 +337,7 @@ ros2 service call /GR301AA0025/slam/load_map fourier_msgs/srv/LoadMap \
 | `current_map=/opt/fftai/nav/xxx` 但 `ls` 没有目录 | 只说明 Adapter 记录了目标路径，不代表保存成功 |
 | `service unavailable` | Adapter client 没发现对应 ROS service |
 | `service timeout` | Adapter 已发起调用，但底层服务在超时时间内没返回 |
+| `save_map` timeout 后 `load_map` 又 unavailable | 底层保存可能仍在运行或 HumanoidNav 服务端临时不可用；不要立刻重试保存/加载，先确认 service client ready、`robot_pose` 新鲜 |
 | 页面 `lastResponse` 里还有 `result.action=stop_mapping` | 这是上一次保存操作响应，不一定是当前自动刷新状态；自动刷新不会主动清空 lastResponse |
 | 点“重试保存地图”也出现 `action=stop_mapping` | 正常。该按钮调用 `/robot/map/save`，后端复用 `stop_mapping()` 调底层 save_map |
 | `robot_pose_not_fresh` | Adapter 没收到新 `/robot_pose`，会影响 readiness，但保存失败仍以 `result.message` 为准 |

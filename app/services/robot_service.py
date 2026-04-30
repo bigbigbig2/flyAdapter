@@ -360,6 +360,22 @@ class RobotService:
             return self._map_target_error(exc, "stop_mapping")
         save_map_id = self._resolve_save_map_id(map_path=map_path, map_name=map_name, target=target)
         save_precheck = self.mapping_readiness()
+        if not self.ros.service_ready("save_map"):
+            result = {
+                "success": False,
+                "message": self.config.ros_name("slam/save_map") + " service is not ready",
+                "action": "stop_mapping",
+                "status_code": -1,
+            }
+            self.state.mark_error(result["message"], status_code=-1)
+            result["map_file"] = target
+            result["map_name"] = self.store.map_name_from_path(target)
+            result["save_map_id"] = save_map_id
+            result["save_id_mode"] = self.config.map_save_id_mode
+            result["timeout_sec"] = self.config.map_save_timeout_sec
+            result["save_precheck"] = save_precheck
+            result["hints"] = self._save_map_hints(result, save_precheck)
+            return result
         result = self._safe_ros_call(lambda: self.ros.save_map(save_map_id), "stop_mapping")
         result["map_file"] = target
         result["map_name"] = self.store.map_name_from_path(target)
@@ -398,6 +414,20 @@ class RobotService:
             error = self._map_target_error(exc, "relocation")
             return {**self.legacy_status(), "result": error}
         load_precheck = self._map_load_precheck(path)
+        if not self.ros.service_ready("load_map"):
+            result = {
+                "success": False,
+                "message": self.config.ros_name("slam/load_map") + " service is not ready",
+                "action": "relocation",
+                "status_code": -1,
+                "map_file": path,
+                "map_name": self.store.map_name_from_path(path),
+                "timeout_sec": self.config.map_load_timeout_sec,
+                "load_precheck": load_precheck,
+            }
+            self.state.mark_error(result["message"], status_code=-1)
+            result["hints"] = self._load_map_hints(result, load_precheck)
+            return {**self.legacy_status(), "result": result}
         result = self._safe_ros_call(lambda: self.ros.load_map(path, x=x, y=y, z=z, yaw=yaw), "relocation")
         result["map_file"] = path
         result["map_name"] = self.store.map_name_from_path(path)
@@ -468,7 +498,10 @@ class RobotService:
         message = str(result.get("message", ""))
         if "timeout" in message:
             hints.append("HumanoidNav save_map did not return before MAP_SAVE_TIMEOUT_SEC")
+            hints.append("save_map may still be running in HumanoidNav; do not immediately retry save/load until services and robot_pose are ready again")
             hints.append("try direct ros2 service call with the reported save_map_id to separate Adapter from HumanoidNav")
+        if "not ready" in message or "unavailable" in message:
+            hints.append("confirm /slam/save_map has a live service server before saving")
         if self.config.map_save_id_mode == "name":
             hints.append("SaveMap.map_id was sent as a map name; set MAP_SAVE_ID_MODE=path if HumanoidNav requires an absolute path")
         else:
@@ -487,6 +520,8 @@ class RobotService:
         if "timeout" in message:
             hints.append("HumanoidNav load_map did not return before MAP_LOAD_TIMEOUT_SEC")
             hints.append("try HumanoidNav scripts/load_map.sh or a direct ros2 service call to separate Adapter from HumanoidNav")
+        if "not ready" in message or "unavailable" in message:
+            hints.append("confirm /slam/load_map has a live service server before loading")
         if precheck.get("slam_mode_before") == "mapping":
             hints.append("load_map was called while slam_mode was still mapping; confirm HumanoidNav can switch to localization")
         return hints

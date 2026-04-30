@@ -47,7 +47,7 @@ class RosBridge:
             try:
                 clients[name] = {
                     "service": client.srv_name,
-                    "ready": bool(client.service_is_ready()),
+                    "ready": self.service_ready(name),
                 }
             except Exception as exc:
                 clients[name] = {"error": str(exc)}
@@ -60,6 +60,15 @@ class RosBridge:
             "rmw_implementation": os.getenv("RMW_IMPLEMENTATION", ""),
             "clients": clients,
         }
+
+    def service_ready(self, client_name: str) -> bool:
+        client = self._clients.get(client_name)
+        if client is None:
+            return False
+        try:
+            return bool(client.service_is_ready())
+        except Exception:
+            return False
 
     def switch_mode(self, mode: str) -> dict[str, Any]:
         SetMode = self._require_type("SetMode")
