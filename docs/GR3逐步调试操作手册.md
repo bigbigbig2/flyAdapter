@@ -253,7 +253,7 @@ source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
 ./scripts/load_map.sh \
-  --map-path /opt/fftai/nav/map \
+  --map-path /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map \
   --namespace GR301AA0025
 ```
 
@@ -289,7 +289,7 @@ timeout 5s ros2 topic echo /GR301AA0025/odom_status_score --once
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+  -d '{"map_path":"/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
 ```
 
 ---

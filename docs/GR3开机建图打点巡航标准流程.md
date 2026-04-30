@@ -10,9 +10,9 @@
 机器人命名空间：GR301AA0025
 工程目录：~/aurora_ws/flyAdapter
 Adapter 地址：http://127.0.0.1:8080
-地图根目录：/opt/fftai/nav
+地图根目录：/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
 地图名称示例：map
-地图最终路径：/opt/fftai/nav/map
+地图最终路径：/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map
 ```
 
 外部电脑访问时，把 `127.0.0.1` 换成机器人 IP；机器人本机终端里继续使用 `127.0.0.1`。
@@ -88,7 +88,7 @@ ssh -X gr301ab0113@<robot-ip>
 ```bash
 hostname
 date
-df -h /opt/fftai/nav ~
+df -h /home/gr301ab0113/aurora_ws/flyAdapter/data/maps ~
 test -d ~/aurora_ws/flyAdapter && echo PROJECT_DIR_OK
 ip addr
 ping -c 3 127.0.0.1
@@ -98,7 +98,7 @@ ping -c 3 127.0.0.1
 
 ```plain
 PROJECT_DIR_OK 出现；
-/opt/fftai/nav 所在磁盘空间足够；
+/home/gr301ab0113/aurora_ws/flyAdapter/data/maps 所在磁盘空间足够；
 机器人本机网络正常。
 ```
 
@@ -159,9 +159,10 @@ source /opt/fftai/humanoidnav/install/setup.bash
 source .venv/bin/activate
 
 export ROBOT_NAMESPACE=GR301AA0025
-export MAP_ROOT=/opt/fftai/nav
+export MAP_ROOT=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
+export MAP_SAVE_FALLBACK_ROOT=
 export DEFAULT_MAP_NAME=map
-export MAP_SAVE_ID_MODE=name
+export MAP_SAVE_ID_MODE=path
 export MAP_LOAD_TIMEOUT_SEC=10
 export MAP_SAVE_TIMEOUT_SEC=10
 export MOTION_GUARD=none
@@ -340,16 +341,16 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
 ```
 
 Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=10` 秒；超过 10 秒直接按底层超时处理。
-默认 `MAP_SAVE_ID_MODE=name` 时，Adapter 会把 `map_name=map` 作为底层
-`SaveMap.map_id` 发给 HumanoidNav，同时把加载路径记录为 `/opt/fftai/nav/map`。
-如果现场直接调用 ROS2 证明底层只接受绝对路径，再改为 `MAP_SAVE_ID_MODE=path`。
+默认 `MAP_SAVE_ID_MODE=path` 时，Adapter 会把 `map_name=map` 解析成
+`/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map`，并把这个绝对路径作为底层
+`SaveMap.map_id` 发给 HumanoidNav。
 如果仍然超时，优先在 HumanoidNav 终端看 `/slam/save_map` 是否仍在写盘、地图数据是否为空、目标磁盘是否可写。
 
 检查地图：
 
 ```bash
 curl http://127.0.0.1:8080/robot/map/list
-ls -lah /opt/fftai/nav/map
+ls -lah /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map
 ```
 
 继续条件：
@@ -383,7 +384,7 @@ result.success=true   加载接口成功返回
 result.success=false  本次加载失败，继续看 result.message
 ```
 
-兼容响应顶层的 `map_file` 是 Adapter 当前记录的地图，失败时可能还是上一次建图或加载留下的旧值。失败响应里真正的本次目标看 `result.map_file`。例如顶层 `map_file=/opt/fftai/nav/hhhh`、但 `result.map_file=/opt/fftai/nav/map`，含义是“当前记录仍是 hhhh，本次尝试加载 map 失败”，不是加载成功。
+兼容响应顶层的 `map_file` 是 Adapter 当前记录的地图，失败时可能还是上一次建图或加载留下的旧值。失败响应里真正的本次目标看 `result.map_file`。例如顶层 `map_file=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/hhhh`、但 `result.map_file=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map`，含义是“当前记录仍是 hhhh，本次尝试加载 map 失败”，不是加载成功。
 
 如果官方脚本返回：
 

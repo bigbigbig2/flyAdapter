@@ -278,7 +278,7 @@ curl http://127.0.0.1:8080/robot/aurora/state?force_refresh=true
 curl -X POST http://127.0.0.1:8080/robot/map/load \
   -H "Content-Type: application/json" \
   -d '{
-    "map_path": "/opt/fftai/nav/map",
+    "map_path": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
     "x": 0,
     "y": 0,
     "z": 0,

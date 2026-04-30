@@ -37,10 +37,10 @@ def normalize_motion_guard(value: str | None) -> str:
 
 
 def normalize_map_save_id_mode(value: str | None) -> str:
-    value = (value or "name").strip().lower()
+    value = (value or "path").strip().lower()
     if value in {"name", "path"}:
         return value
-    return "name"
+    return "path"
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,7 @@ class AppConfig:
     namespace: str
     data_dir: Path
     map_root: Path
+    map_save_fallback_root: Path | None
     default_map_name: str
     default_map_path: str
     nav_points_file: Path
@@ -96,7 +97,11 @@ def load_config() -> AppConfig:
     ).expanduser()
     motion_guard = normalize_motion_guard(os.getenv("MOTION_GUARD", "none"))
 
-    map_root = Path(os.getenv("MAP_ROOT", "/opt/fftai/nav")).expanduser()
+    map_root = Path(
+        os.getenv("MAP_ROOT", "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps")
+    ).expanduser()
+    fallback_raw = os.getenv("MAP_SAVE_FALLBACK_ROOT", "").strip()
+    map_save_fallback_root = Path(fallback_raw).expanduser() if fallback_raw else None
     default_map_name = os.getenv("DEFAULT_MAP_NAME", "map").strip() or "map"
     default_map_path_raw = os.getenv("DEFAULT_MAP_PATH", "").strip()
     if default_map_path_raw:
@@ -110,6 +115,7 @@ def load_config() -> AppConfig:
         namespace=os.getenv("ROBOT_NAMESPACE", "GR301AA0025"),
         data_dir=data_dir,
         map_root=map_root,
+        map_save_fallback_root=map_save_fallback_root,
         default_map_name=default_map_name,
         default_map_path=default_map_path,
         nav_points_file=nav_points_file,
@@ -138,5 +144,5 @@ def load_config() -> AppConfig:
         nav_goal_timeout_sec=float(os.getenv("NAV_GOAL_TIMEOUT_SEC", "300")),
         map_load_timeout_sec=float(os.getenv("MAP_LOAD_TIMEOUT_SEC", "10")),
         map_save_timeout_sec=float(os.getenv("MAP_SAVE_TIMEOUT_SEC", "10")),
-        map_save_id_mode=normalize_map_save_id_mode(os.getenv("MAP_SAVE_ID_MODE", "name")),
+        map_save_id_mode=normalize_map_save_id_mode(os.getenv("MAP_SAVE_ID_MODE", "path")),
     )

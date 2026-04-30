@@ -58,26 +58,28 @@ class JsonStore:
         raise FileNotFoundError(f"cruise file not found: {name}")
 
     def list_maps(self) -> list[dict[str, Any]]:
-        root = self.config.map_root
         maps: list[dict[str, Any]] = []
-        if not root.exists():
-            return maps
-        for path in sorted(root.iterdir()):
-            if not path.is_dir():
+        for root, root_kind in self._map_roots():
+            if not root.exists():
                 continue
-            has_pcd = (path / "global.pcd").exists()
-            has_yaml = (path / "map.yaml").exists()
-            has_pgm = (path / "map.pgm").exists()
-            maps.append(
-                {
-                    "name": path.name,
-                    "path": str(path),
-                    "has_global_pcd": has_pcd,
-                    "has_map_yaml": has_yaml,
-                    "has_map_pgm": has_pgm,
-                    "valid_for_load": has_pcd and has_yaml and has_pgm,
-                }
-            )
+            for path in sorted(root.iterdir()):
+                if not path.is_dir():
+                    continue
+                has_pcd = (path / "global.pcd").exists()
+                has_yaml = (path / "map.yaml").exists()
+                has_pgm = (path / "map.pgm").exists()
+                maps.append(
+                    {
+                        "name": path.name,
+                        "path": str(path),
+                        "map_root": str(root),
+                        "root_kind": root_kind,
+                        "has_global_pcd": has_pcd,
+                        "has_map_yaml": has_yaml,
+                        "has_map_pgm": has_pgm,
+                        "valid_for_load": has_pcd and has_yaml and has_pgm,
+                    }
+                )
         return maps
 
     def resolve_map_name(self, name: str) -> str:
@@ -94,26 +96,43 @@ class JsonStore:
             return str(path)
 
         safe_name = self._safe_name(raw)
-        root = self.config.map_root.resolve()
-        path = (root / safe_name).resolve()
-        try:
-            path.relative_to(root)
-        except ValueError as exc:
-            raise ValueError(f"map path escaped MAP_ROOT: {raw}") from exc
-        if require_exists and not path.exists():
-            raise FileNotFoundError(f"map not found: {raw}")
-        return str(path)
+        candidates = []
+        for root, _ in self._map_roots():
+            resolved_root = root.resolve()
+            candidate = (resolved_root / safe_name).resolve()
+            try:
+                candidate.relative_to(resolved_root)
+            except ValueError as exc:
+                raise ValueError(f"map path escaped configured map roots: {raw}") from exc
+            candidates.append(candidate)
+            if require_exists and candidate.exists():
+                return str(candidate)
+        if require_exists:
+            searched = ", ".join(str(path) for path in candidates)
+            raise FileNotFoundError(f"map not found: {raw}; searched: {searched}")
+        return str(candidates[0])
 
     def map_name_from_path(self, path: str) -> str:
         raw = str(path or "").strip()
         if not raw:
             return ""
         try:
-            root = self.config.map_root.resolve()
             target = Path(raw).expanduser().resolve()
-            return str(target.relative_to(root)).replace("\\", "/")
+            for root, _ in self._map_roots():
+                try:
+                    return str(target.relative_to(root.resolve())).replace("\\", "/")
+                except ValueError:
+                    continue
         except Exception:
-            return Path(raw).name
+            pass
+        return Path(raw).name
+
+    def _map_roots(self) -> list[tuple[Path, str]]:
+        roots: list[tuple[Path, str]] = [(self.config.map_root, "primary")]
+        fallback = self.config.map_save_fallback_root
+        if fallback is not None and fallback != self.config.map_root:
+            roots.append((fallback, "fallback"))
+        return roots
 
     def load_routes(self) -> dict[str, Any]:
         return self._read_json(self.routes_file, {"routes": []})
@@ -140,6 +159,7 @@ class JsonStore:
                     "q_y": cls._float(point.get("q_y", point.get("pose", {}).get("q_y", 0.0))),
                     "q_z": cls._float(point.get("q_z", point.get("pose", {}).get("q_z", 0.0))),
                     "q_w": cls._float(point.get("q_w", point.get("pose", {}).get("q_w", 1.0)), default=1.0),
+                    "map_file": point.get("map_file"),
                     "map_name": point.get("map_name"),
                     "frame_id": str(point.get("frame_id", "map")),
                     "tags": list(point.get("tags", [])) if isinstance(point.get("tags", []), list) else [],

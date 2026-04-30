@@ -15,16 +15,16 @@ http://机器人IP:8080
 地图保存统一规则：
 
 ```plain
-MAP_ROOT=/opt/fftai/nav
+MAP_ROOT=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
 DEFAULT_MAP_NAME=map
 最终路径 = MAP_ROOT / map_name
-MAP_SAVE_ID_MODE=name
+MAP_SAVE_ID_MODE=path
 MAP_LOAD_TIMEOUT_SEC=10
 MAP_SAVE_TIMEOUT_SEC=10
 ```
 
 所有地图接口都优先推荐传 `map_name`。例如 `map`
-会解析为机器人现有的 `/opt/fftai/nav/map`。只有需要临时绕过
+会解析为 `/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map`。只有需要临时绕过
 统一目录时，才传绝对 `map_path`。
 
 ## 1. Unitree 兼容接口
@@ -78,10 +78,9 @@ curl -X POST http://127.0.0.1:8080/slam/start_mapping \
 ### POST `/slam/stop_mapping`
 
 保存地图。兼容原工程误写的 `/aslam/stop_mapping`。底层调用
-`/GR301AA0025/slam/save_map`，请求字段是 `map_id`。默认 `MAP_SAVE_ID_MODE=name`，
-因此传 `map_name=map` 时底层收到的 `map_id` 是 `map`，而不是
-`/opt/fftai/nav/map`；如果现场确认 HumanoidNav 必须吃绝对路径，可以改成
-`MAP_SAVE_ID_MODE=path`。
+`/GR301AA0025/slam/save_map`，请求字段是 `map_id`。默认 `MAP_SAVE_ID_MODE=path`，
+因此传 `map_name=map` 时底层收到的 `map_id` 是
+`/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map`，避免 HumanoidNav 写入无权限的相对 `./data/...`。
 Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=10` 秒；超过 10 秒直接按底层超时处理。
 
 ```bash
@@ -250,11 +249,11 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 ```json
 {
-  "map_root": "/opt/fftai/nav",
+  "map_root": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps",
   "default_map_name": "map",
-  "default_map_path": "/opt/fftai/nav/map",
-  "current_map": "/opt/fftai/nav/map",
-  "save_id_mode": "name"
+  "default_map_path": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+  "current_map": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+  "save_id_mode": "path"
 }
 ```
 

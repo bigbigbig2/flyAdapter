@@ -222,17 +222,17 @@ gr3/data
 地图路径统一规则：
 
 ```plain
-MAP_ROOT=/opt/fftai/nav
+MAP_ROOT=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
 DEFAULT_MAP_NAME=map
-map_name=map -> /opt/fftai/nav/map
-MAP_SAVE_ID_MODE=name
+map_name=map -> /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map
+MAP_SAVE_ID_MODE=path
 MAP_LOAD_TIMEOUT_SEC=10
 MAP_SAVE_TIMEOUT_SEC=10
 ```
 
 API 优先使用 `map_name`，Adapter 统一解析成绝对路径后再传给
 HumanoidNav 的 `LoadMap.map_path`。保存时默认把 `map_name` 作为
-`SaveMap.map_id`，避免把 `/opt/fftai/nav/map` 这种既是现有地图目录又是保存目标
+`SaveMap.map_id`，避免把 `/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map` 这种既是现有地图目录又是保存目标
 的路径直接交给底层删除重建。只有现场确认必须传绝对路径时，才把
 `MAP_SAVE_ID_MODE` 改为 `path`。
 
@@ -240,7 +240,7 @@ HumanoidNav 的 `LoadMap.map_path`。保存时默认把 `map_name` 作为
 
 ```json
 {
-  "map_file": "/opt/fftai/nav/map",
+  "map_file": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
   "initial_pose": {
     "x": 0,
     "y": 0,

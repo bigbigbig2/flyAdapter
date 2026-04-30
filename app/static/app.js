@@ -16,9 +16,9 @@ let lastSlamStatus = {};
 let lastPoints = [];
 let lastPointIssues = { duplicateNames: [], duplicateCount: 0 };
 let currentMapConfig = {
-  map_root: "/opt/fftai/nav",
+  map_root: "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps",
   default_map_name: "map",
-  default_map_path: "/opt/fftai/nav/map",
+  default_map_path: "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
   load_timeout_sec: 10,
   save_timeout_sec: 10,
 };
@@ -111,13 +111,17 @@ function logOperation(title, data) {
   }
   const now = new Date().toLocaleTimeString();
   const mark = resultOk(data) ? "OK" : "CHECK";
-  const detail = data?.message || data?.error || data?.status || "";
+  const detail = responseMessage(data);
   log.textContent += `[${now}] ${mark} ${title}${detail ? ` - ${detail}` : ""}\n`;
   const lines = log.textContent.split("\n");
   if (lines.length > 240) {
     log.textContent = lines.slice(-220).join("\n");
   }
   log.scrollTop = log.scrollHeight;
+}
+
+function responseMessage(data) {
+  return data?.result?.message || data?.message || data?.error || data?.status || "";
 }
 
 function boolText(value) {
@@ -215,7 +219,7 @@ function mapOperationTimeoutMs(value) {
 }
 
 function joinMapPath(root, name) {
-  const cleanRoot = String(root || "/opt/fftai/nav").replace(/[\\/]+$/, "");
+  const cleanRoot = String(root || "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps").replace(/[\\/]+$/, "");
   const cleanName = String(name || "map").replace(/^[\\/]+|[\\/]+$/g, "");
   return `${cleanRoot}/${cleanName}`;
 }
@@ -372,13 +376,30 @@ async function refresh(updateLast = false) {
   }
   refreshing = true;
   try {
-    const [status, slamStatus] = await Promise.all([
+    const [statusResult, slamResult] = await Promise.allSettled([
       api("/robot/status", { updateLast, log: updateLast }),
       api("/slam/status", { updateLast: false, log: updateLast }),
     ]);
-    lastStatus = status || {};
-    lastSlamStatus = slamStatus || {};
+
+    if (statusResult.status === "fulfilled") {
+      lastStatus = statusResult.value || {};
+    }
+    if (slamResult.status === "fulfilled") {
+      lastSlamStatus = slamResult.value || {};
+    }
+    if (statusResult.status === "rejected" && slamResult.status === "rejected") {
+      throw statusResult.reason || slamResult.reason || new Error("status unavailable");
+    }
+
     renderStatus(lastStatus, lastSlamStatus);
+    if (statusResult.status === "rejected" || slamResult.status === "rejected") {
+      const failed = [
+        statusResult.status === "rejected" ? `/robot/status: ${statusResult.reason?.message || statusResult.reason}` : "",
+        slamResult.status === "rejected" ? `/slam/status: ${slamResult.reason?.message || slamResult.reason}` : "",
+      ].filter(Boolean);
+      setAdapter(true, "partial");
+      setText("healthLine", `部分状态接口异常：${failed.join("; ")}`);
+    }
   } catch (error) {
     setAdapter(false, "offline");
     setText("healthLine", String(error.message || error));
@@ -657,7 +678,7 @@ async function savePoint() {
   }
   await api("/robot/poi/save_current", {
     method: "POST",
-    body: { name },
+    body: { name, map_name: mapNameValue() },
   });
   selectedPoi = name;
   await loadPoints(false);
@@ -701,7 +722,7 @@ async function gotoPoi(name = $("poiSelect")?.value) {
   selectedPoi = name;
   const data = await api("/robot/navigation/goto_poi", {
     method: "POST",
-    body: { name, force: Boolean($("forceNav")?.checked) },
+    body: { name, map_name: mapNameValue(), force: Boolean($("forceNav")?.checked) },
   });
   setJson("verifyBox", data);
   await refresh(false);

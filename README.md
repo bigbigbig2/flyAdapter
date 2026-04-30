@@ -25,9 +25,10 @@ python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 
 export MOTION_GUARD=none
 export AURORA_ENABLED=0
-export MAP_ROOT=/opt/fftai/nav
+export MAP_ROOT=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
+export MAP_SAVE_FALLBACK_ROOT=
 export DEFAULT_MAP_NAME=map
-export MAP_SAVE_ID_MODE=name
+export MAP_SAVE_ID_MODE=path
 export MAP_LOAD_TIMEOUT_SEC=10
 export MAP_SAVE_TIMEOUT_SEC=10
 
@@ -70,7 +71,7 @@ export AURORA_AGENT_URL=http://127.0.0.1:18080
 - 内部调试层：`/robot/...`
 - ROS2 桥接：HumanoidNav 的 topic/service/action
 - 运动控制策略：默认 `MOTION_GUARD=none`，建图/打点由遥控器控制，自动导航由 Nav2 goal 控制
-- 地图命名：统一使用 `map_name`，保存/加载路径解析为 `MAP_ROOT/map_name`；默认 `map_name=map` 对应机器人现有 `/opt/fftai/nav/map`，只有临时绕过统一目录时才传绝对 `map_path`
+- 地图命名：统一使用 `map_name`，保存/加载路径解析为 `MAP_ROOT/map_name`；默认 `map_name=map` 对应 `/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map`，只有临时绕过统一目录时才传绝对 `map_path`
 - Aurora 桥接：可选。主 Adapter 只调用本地 Aurora Agent；Agent 独立运行在能 import Aurora SDK 且能 DDS 匹配 AuroraCore 的环境里
 - 本地数据：导航点、巡航文件、runtime 状态
 

@@ -1,5 +1,5 @@
 {
-  "map_file": "/opt/fftai/nav/map",
+  "map_file": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
   "initial_pose": {
     "x": 0.0,
     "y": 0.0,
@@ -19,7 +19,8 @@
       "q_y": 0.0,
       "q_z": 0.0,
       "q_w": 1.0,
-      "map_name": null,
+      "map_file": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+      "map_name": "map",
       "frame_id": "map",
       "tags": [],
       "meta": {}
@@ -32,7 +33,9 @@
       "q_x": 0.0,
       "q_y": 0.0,
       "q_z": 0.0,
-      "q_w": 1.0
+      "q_w": 1.0,
+      "map_file": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+      "map_name": "map"
     }
   ]
 }

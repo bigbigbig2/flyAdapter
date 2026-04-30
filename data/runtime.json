@@ -1,3 +1,5 @@
 {
-  "current_map": "/opt/fftai/nav/map"
+  "current_map": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+  "current_map_name": "map",
+  "map_root": "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps"
 }

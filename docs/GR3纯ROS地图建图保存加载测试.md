@@ -113,7 +113,7 @@ timeout 3s ros2 topic echo $NS/robot_pose --once
 
 ---
 
-## 4. 保存地图：按地图名保存
+## 4. 保存地图：按地图名保存（风险项）
 
 先不要覆盖已有 `map`，建议用测试名：
 
@@ -131,17 +131,18 @@ fourier_msgs.srv.SaveMap_Response(response=0)
 说明：
 
 - `map_id='test_save_001'` 是按名字保存。
-- HumanoidNav 对相对 `map_id` 的落盘目录由底层实现决定，不一定等于 `/opt/fftai/nav/test_save_001`。
-- 如果需要明确保存到 `/opt/fftai/nav/...`，用下一节的绝对路径测试。
+- HumanoidNav 对相对 `map_id` 的落盘目录由底层实现决定；现场日志显示它会保存到 `./data/test_save_001/`。
+- 如果 `run_unified_online` 进程工作目录下的 `./data` 没有写权限，`std::filesystem::create_directories()` 会抛 `Permission denied`，并可能导致核心 SLAM 进程退出。
+- 如果需要明确保存到统一地图目录，用下一节的绝对路径测试。
 
 ---
 
 ## 5. 保存地图：按绝对路径保存
 
-推荐用这个方式确认 `/opt/fftai/nav` 下是否能直接落盘：
+推荐用这个方式确认统一地图目录下是否能直接落盘：
 
 ```bash
-ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: '/opt/fftai/nav/test_save_001'}"
+ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: '/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001'}"
 ```
 
 成功返回：
@@ -154,7 +155,7 @@ fourier_msgs.srv.SaveMap_Response(response=0)
 检查文件：
 
 ```bash
-ls -lah /opt/fftai/nav/test_save_001
+ls -lah /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001
 ```
 
 有效地图目录通常至少应包含：
@@ -165,10 +166,16 @@ map.yaml
 map.pgm
 ```
 
-如果按名字保存超时或找不到结果，但绝对路径保存成功，Adapter 启动时应配置：
+如果按名字保存超时、进程退出或找不到结果，但绝对路径保存成功，Adapter 启动时应配置：
 
 ```bash
 export MAP_SAVE_ID_MODE=path
+```
+
+保存前也要确认目标目录可写，例如：
+
+```bash
+mkdir -p /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001
 ```
 
 ---
@@ -179,7 +186,7 @@ export MAP_SAVE_ID_MODE=path
 
 ```bash
 ros2 service call $NS/slam/load_map fourier_msgs/srv/LoadMap \
-  "{map_path: '/opt/fftai/nav/map/', x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}"
+  "{map_path: '/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map/', x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}"
 ```
 
 成功返回：
@@ -203,11 +210,11 @@ timeout 3s ros2 topic echo $NS/odom_status_code --once
 
 ## 7. 加载刚保存的测试地图
 
-如果前面保存到了 `/opt/fftai/nav/test_save_001`：
+如果前面保存到了 `/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001`：
 
 ```bash
 ros2 service call $NS/slam/load_map fourier_msgs/srv/LoadMap \
-  "{map_path: '/opt/fftai/nav/test_save_001', x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}"
+  "{map_path: '/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001', x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}"
 ```
 
 检查：
@@ -229,7 +236,7 @@ source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
 ./scripts/load_map.sh \
-  --map-path /opt/fftai/nav/map/ \
+  --map-path /home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map/ \
   --namespace GR301AA0025
 ```
 
@@ -256,7 +263,7 @@ fourier_msgs.srv.LoadMap_Response(result=0, message='Successfully loaded map and
 
 ```bash
 ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: 'test_save_001'}"
-ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: '/opt/fftai/nav/test_save_001'}"
+ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: '/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001'}"
 ```
 
 判断：
@@ -267,6 +274,7 @@ ros2 service call $NS/slam/save_map fourier_msgs/srv/SaveMap "{map_id: '/opt/fft
 | 两种都超时 | HumanoidNav 当前保存服务或建图数据状态异常 |
 | 返回 `response=3` | 地图数据为空，可能没有真实建图数据 |
 | 返回 `response=1` | 保存操作已在运行，等底层恢复后再试 |
+| 日志出现 `cannot create directories: Permission denied [./data/xxx]` | 相对 `map_id` 落到了 HumanoidNav 进程工作目录下的 `./data`，目录不可写；改用绝对 `map_path` 或修复该 `data` 目录权限 |
 
 保存超时后不要立刻反复调用 `save_map` 或 `load_map`。先确认服务和位姿恢复：
 
@@ -282,6 +290,32 @@ timeout 3s ros2 topic echo $NS/robot_pose --once
 
 纯 ROS2 验证成功后，再测 Adapter：
 
+Adapter 默认应使用绝对路径保存：
+
+```bash
+export MAP_ROOT=/home/gr301ab0113/aurora_ws/flyAdapter/data/maps
+export MAP_SAVE_FALLBACK_ROOT=
+export MAP_SAVE_ID_MODE=path
+```
+
+Adapter 保存时会尝试 `${MAP_ROOT}/${map_name}`，并把 `runtime.current_map` 记录成实际保存路径。默认不再保存到旧的受保护目录。
+
+后续加载同一张地图时可以直接传实际路径：
+
+```bash
+curl -X POST http://127.0.0.1:8080/slam/relocation \
+  -H "Content-Type: application/json" \
+  -d '{"map_path":"/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+```
+
+也可以继续传 `map_name`。Adapter 会按 `MAP_ROOT/map_name` 解析：
+
+```bash
+curl -X POST http://127.0.0.1:8080/slam/relocation \
+  -H "Content-Type: application/json" \
+  -d '{"map_name":"test_save_001","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+```
+
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/start_mapping \
   -H "Content-Type: application/json" \
@@ -293,7 +327,7 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
 
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/test_save_001","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+  -d '{"map_path":"/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/test_save_001","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
 ```
 
 如果纯 ROS2 成功而 Adapter 失败，检查 Adapter 进程视角：

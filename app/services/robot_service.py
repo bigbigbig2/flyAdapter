@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -36,8 +37,11 @@ class RobotService:
         self._nav_lock = threading.RLock()
 
         runtime = self.store.load_runtime()
-        if runtime.get("current_map"):
-            self.state.current_map = str(runtime["current_map"])
+        runtime_map = str(runtime.get("current_map") or "").strip()
+        if runtime_map and self._is_configured_map_path(runtime_map):
+            self.state.current_map = runtime_map
+        elif runtime_map:
+            self._record_current_map(self.config.default_map_path, map_name=self.config.default_map_name)
 
     def start(self) -> None:
         self.aurora.start()
@@ -153,6 +157,7 @@ class RobotService:
         current_map = snap["current_map"]
         return {
             "map_root": str(self.config.map_root),
+            "map_save_fallback_root": str(self.config.map_save_fallback_root) if self.config.map_save_fallback_root else "",
             "default_map_name": self.config.default_map_name,
             "default_map_path": self.config.default_map_path,
             "current_map": current_map,
@@ -360,6 +365,37 @@ class RobotService:
             return self._map_target_error(exc, "stop_mapping")
         save_map_id = self._resolve_save_map_id(map_path=map_path, map_name=map_name, target=target)
         save_precheck = self.mapping_readiness()
+        path_precheck = self._map_save_path_precheck(save_map_id, create=True)
+        if not path_precheck["ok"]:
+            fallback = self._fallback_save_target(map_path=map_path, map_name=map_name, target=target)
+            if fallback:
+                fallback_precheck = self._map_save_path_precheck(fallback, create=True)
+                fallback_precheck["fallback_used"] = fallback_precheck["ok"]
+                fallback_precheck["primary_target"] = target
+                fallback_precheck["primary_save_map_id"] = save_map_id
+                fallback_precheck["primary_error"] = path_precheck["message"]
+                if fallback_precheck["ok"]:
+                    target = fallback
+                    save_map_id = fallback
+                    path_precheck = fallback_precheck
+        save_precheck["save_path"] = path_precheck
+        if not path_precheck["ok"]:
+            result = {
+                "success": False,
+                "message": path_precheck["message"],
+                "action": "stop_mapping",
+                "status_code": 400,
+                "map_file": target,
+                "map_name": self.store.map_name_from_path(target),
+                "save_map_id": save_map_id,
+                "save_id_mode": self._effective_save_id_mode(save_map_id),
+                "configured_save_id_mode": self.config.map_save_id_mode,
+                "timeout_sec": self.config.map_save_timeout_sec,
+                "save_precheck": save_precheck,
+            }
+            self.state.mark_error(result["message"], status_code=400)
+            result["hints"] = self._save_map_hints(result, save_precheck)
+            return result
         if not self.ros.service_ready("save_map"):
             result = {
                 "success": False,
@@ -371,7 +407,8 @@ class RobotService:
             result["map_file"] = target
             result["map_name"] = self.store.map_name_from_path(target)
             result["save_map_id"] = save_map_id
-            result["save_id_mode"] = self.config.map_save_id_mode
+            result["save_id_mode"] = self._effective_save_id_mode(save_map_id)
+            result["configured_save_id_mode"] = self.config.map_save_id_mode
             result["timeout_sec"] = self.config.map_save_timeout_sec
             result["save_precheck"] = save_precheck
             result["hints"] = self._save_map_hints(result, save_precheck)
@@ -380,7 +417,8 @@ class RobotService:
         result["map_file"] = target
         result["map_name"] = self.store.map_name_from_path(target)
         result["save_map_id"] = save_map_id
-        result["save_id_mode"] = self.config.map_save_id_mode
+        result["save_id_mode"] = self._effective_save_id_mode(save_map_id)
+        result["configured_save_id_mode"] = self.config.map_save_id_mode
         result["timeout_sec"] = self.config.map_save_timeout_sec
         result["save_precheck"] = save_precheck
         if result.get("success") is False:
@@ -463,6 +501,19 @@ class RobotService:
             return self.store.resolve_map_reference(self.config.default_map_path, require_exists=True)
         return self.config.default_map_path
 
+    def _is_configured_map_path(self, path: str) -> bool:
+        try:
+            target = Path(path).expanduser().resolve(strict=False)
+            for root, _ in self.store._map_roots():
+                try:
+                    target.relative_to(root.resolve(strict=False))
+                    return True
+                except ValueError:
+                    continue
+        except Exception:
+            return False
+        return False
+
     def _map_load_precheck(self, path: str) -> dict[str, Any]:
         map_path = Path(path)
         return {
@@ -486,6 +537,111 @@ class RobotService:
             return raw_name
         return self.store.map_name_from_path(target) or target
 
+    @staticmethod
+    def _effective_save_id_mode(save_map_id: str) -> str:
+        return "path" if Path(str(save_map_id or "").strip()).expanduser().is_absolute() else "name"
+
+    def _fallback_save_target(self, map_path: str | None, map_name: str | None, target: str) -> str:
+        if str(map_path or "").strip():
+            return ""
+        fallback_root = self.config.map_save_fallback_root
+        if fallback_root is None:
+            return ""
+        try:
+            primary_root = self.config.map_root.resolve()
+            fallback_resolved = fallback_root.resolve()
+            if fallback_resolved == primary_root:
+                return ""
+        except Exception:
+            fallback_resolved = fallback_root
+
+        name = str(map_name or "").strip() or self.store.map_name_from_path(target) or self.config.default_map_name
+        safe_name = self.store._safe_name(name)
+        return str((fallback_resolved / safe_name).resolve())
+
+    def _map_save_path_precheck(self, save_map_id: str, create: bool = False) -> dict[str, Any]:
+        raw = str(save_map_id or "").strip()
+        path = Path(raw).expanduser()
+        precheck: dict[str, Any] = {
+            "save_map_id": raw,
+            "is_absolute": path.is_absolute(),
+            "ok": True,
+        }
+        if not raw:
+            precheck["ok"] = False
+            precheck["message"] = "SaveMap.map_id is empty"
+            return precheck
+        if not path.is_absolute():
+            precheck["ok"] = False
+            precheck["message"] = (
+                "SaveMap.map_id is relative; HumanoidNav will save under its process cwd "
+                "such as ./data and may crash on permission denied. Use MAP_SAVE_ID_MODE=path "
+                "or pass an absolute map_path."
+            )
+            return precheck
+
+        target = path.resolve(strict=False)
+        parent = target.parent
+        if create and not target.exists():
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                precheck.update(
+                    {
+                        "target_path": str(target),
+                        "target_exists": target.exists(),
+                        "target_is_dir": target.is_dir(),
+                        "target_writable": target.is_dir() and os.access(target, os.W_OK),
+                        "parent_path": str(parent),
+                        "parent_exists": parent.exists(),
+                        "parent_is_dir": parent.is_dir(),
+                        "parent_writable": parent.is_dir() and os.access(parent, os.W_OK),
+                        "create_attempted": True,
+                        "create_error": str(exc),
+                    }
+                )
+                precheck["ok"] = False
+                precheck["message"] = f"cannot create map save target directory: {target}: {exc}"
+                return precheck
+        precheck.update(
+            {
+                "target_path": str(target),
+                "target_exists": target.exists(),
+                "target_is_dir": target.is_dir(),
+                "target_writable": target.is_dir() and os.access(target, os.W_OK),
+                "parent_path": str(parent),
+                "parent_exists": parent.exists(),
+                "parent_is_dir": parent.is_dir(),
+                "parent_writable": parent.is_dir() and os.access(parent, os.W_OK),
+                "create_attempted": create,
+            }
+        )
+        if target.exists() and not target.is_dir():
+            precheck["ok"] = False
+            precheck["message"] = f"map save target exists but is not a directory: {target}"
+            return precheck
+        if target.is_dir() and not os.access(target, os.W_OK):
+            precheck["ok"] = False
+            precheck["message"] = f"map save target directory is not writable: {target}"
+            return precheck
+        if target.is_dir():
+            precheck["message"] = "map save target path is absolute and writable"
+            return precheck
+        if not parent.exists():
+            precheck["ok"] = False
+            precheck["message"] = f"map save parent directory does not exist: {parent}"
+            return precheck
+        if not parent.is_dir():
+            precheck["ok"] = False
+            precheck["message"] = f"map save parent path is not a directory: {parent}"
+            return precheck
+        if not os.access(parent, os.W_OK):
+            precheck["ok"] = False
+            precheck["message"] = f"map save parent directory is not writable: {parent}"
+            return precheck
+        precheck["message"] = "map save target path is absolute and writable"
+        return precheck
+
     def _map_target_error(self, exc: Exception, action_name: str) -> dict[str, Any]:
         status_code = 404 if isinstance(exc, FileNotFoundError) else 400
         self.state.mark_error(str(exc), status_code=status_code)
@@ -502,10 +658,23 @@ class RobotService:
             hints.append("try direct ros2 service call with the reported save_map_id to separate Adapter from HumanoidNav")
         if "not ready" in message or "unavailable" in message:
             hints.append("confirm /slam/save_map has a live service server before saving")
-        if self.config.map_save_id_mode == "name":
+        save_path = readiness.get("save_path", {})
+        if save_path and save_path.get("fallback_used"):
+            hints.append("primary map path was not writable; saved to MAP_SAVE_FALLBACK_ROOT instead")
+        if save_path and not save_path.get("is_absolute", True):
+            hints.append("relative SaveMap.map_id makes HumanoidNav write under its process cwd; use an absolute map_path")
+        if save_path and save_path.get("create_error"):
+            hints.append("Adapter could not create the requested map directory with its current OS permissions")
+        if save_path and save_path.get("parent_exists") is False:
+            hints.append("create the map parent directory before saving, then chown it to the HumanoidNav runtime user")
+        if save_path and save_path.get("parent_writable") is False:
+            hints.append("grant write permission on the map parent directory to the HumanoidNav runtime user")
+        if save_path and save_path.get("target_writable") is False and save_path.get("target_exists"):
+            hints.append("grant write permission on the existing map target directory or choose a new map_path")
+        if save_path and save_path.get("is_absolute"):
+            hints.append("SaveMap.map_id was sent as an absolute path")
+        elif self.config.map_save_id_mode == "name":
             hints.append("SaveMap.map_id was sent as a map name; set MAP_SAVE_ID_MODE=path if HumanoidNav requires an absolute path")
-        else:
-            hints.append("SaveMap.map_id was sent as an absolute path; set MAP_SAVE_ID_MODE=name to send only the map name")
         return hints
 
     def _load_map_hints(self, result: dict[str, Any], precheck: dict[str, Any]) -> list[str]:
@@ -532,6 +701,7 @@ class RobotService:
         runtime["current_map"] = path
         runtime["current_map_name"] = map_name or self.store.map_name_from_path(path)
         runtime["map_root"] = str(self.config.map_root)
+        runtime["map_save_fallback_root"] = str(self.config.map_save_fallback_root) if self.config.map_save_fallback_root else ""
         self.store.save_runtime(runtime)
 
     def wait_for_localization(self, timeout_sec: float = 30.0) -> dict[str, Any]:
@@ -547,8 +717,11 @@ class RobotService:
         points, map_file, initial_pose = self.store.load_nav_points()
         point_name = name or f"point_{len(points) + 1}"
         point = legacy_point_from_pose(point_name, self.get_pose())
+        current_map = self.state.snapshot()["current_map"]
+        point["map_file"] = current_map
+        point["map_name"] = self.store.map_name_from_path(current_map)
         points.append(point)
-        self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
+        self.store.save_nav_points(points, map_file or current_map, initial_pose)
         self.state.total_nav_points = len(points)
         return self.legacy_status()
 
@@ -726,8 +899,9 @@ class RobotService:
 
     def save_current_poi(self, name: str, map_name: str | None = None, tags: list[str] | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
         point = legacy_point_from_pose(name, self.get_pose())
-        if map_name:
-            point["map_name"] = map_name
+        current_map = self.state.snapshot()["current_map"]
+        point["map_file"] = current_map
+        point["map_name"] = map_name or self.store.map_name_from_path(current_map)
         if tags:
             point["tags"] = tags
         if meta:
