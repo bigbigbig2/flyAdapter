@@ -583,6 +583,9 @@ async function startMapping() {
 }
 
 async function stopMapping() {
+  if (!window.confirm("停止建图并调用底层 save_map 保存当前地图？")) {
+    return;
+  }
   const result = await api("/slam/stop_mapping", {
     method: "POST",
     body: currentMapPayload(),
@@ -596,6 +599,9 @@ async function stopMapping() {
 }
 
 async function saveMap() {
+  if (!window.confirm("重新调用底层 save_map 保存当前地图？这会再次触发地图保存服务。")) {
+    return;
+  }
   const result = await api("/robot/map/save", {
     method: "POST",
     body: currentMapPayload(),

@@ -111,6 +111,44 @@ source /opt/fftai/humanoidnav/install/setup.bash
   --namespace GR301AA0025
 ```
 
+注意：`load_map.sh` 是 HumanoidNav 工程里的脚本，不在 `~/aurora_ws/flyAdapter/scripts/` 下。必须先 `cd /opt/fftai/humanoidnav`，否则会出现：
+
+```plain
+bash: ./scripts/load_map.sh: No such file or directory
+```
+
+如果脚本输出是：
+
+```plain
+[load_map] Calling /slam/load_map service...
+waiting for service to become available...
+```
+
+说明这次脚本没有使用 `GR301AA0025` 命名空间，正在等非命名空间的 `/slam/load_map`。现场服务通常在 `/GR301AA0025/slam/load_map`，必须加：
+
+```bash
+--namespace GR301AA0025
+```
+
+正确输出应当显示正在调用 `/GR301AA0025/slam/load_map`，或者至少能在同一终端看到：
+
+```bash
+ros2 service list | grep /GR301AA0025/slam/load_map
+```
+
+如果脚本输出是：
+
+```plain
+[load_map] Calling /GR301AA0025/slam/load_map service...
+waiting for service to become available...
+requester: making request: fourier_msgs.srv.LoadMap_Request(...)
+
+response:
+fourier_msgs.srv.LoadMap_Response(result=0, message='Successfully loaded map and switched to localization mode')
+```
+
+这是成功。`waiting for service to become available...` 只是 `ros2 service call` 在等待匹配服务，后面出现 `requester` 和 `response result=0` 才是最终结果。
+
 然后用 Adapter 走同一张地图：
 
 ```bash
@@ -299,6 +337,8 @@ ros2 service call /GR301AA0025/slam/load_map fourier_msgs/srv/LoadMap \
 | `current_map=/opt/fftai/nav/xxx` 但 `ls` 没有目录 | 只说明 Adapter 记录了目标路径，不代表保存成功 |
 | `service unavailable` | Adapter client 没发现对应 ROS service |
 | `service timeout` | Adapter 已发起调用，但底层服务在超时时间内没返回 |
+| 页面 `lastResponse` 里还有 `result.action=stop_mapping` | 这是上一次保存操作响应，不一定是当前自动刷新状态；自动刷新不会主动清空 lastResponse |
+| 点“重试保存地图”也出现 `action=stop_mapping` | 正常。该按钮调用 `/robot/map/save`，后端复用 `stop_mapping()` 调底层 save_map |
 | `robot_pose_not_fresh` | Adapter 没收到新 `/robot_pose`，会影响 readiness，但保存失败仍以 `result.message` 为准 |
 | `map_name=xxx` 保存到 `/opt/fftai/nav/xxx` | 当前设计如此，因为 `MAP_ROOT=/opt/fftai/nav` |
 | 想保存到 `/opt/fftai/nav/map/xxx` | 用绝对 `map_path`，或改 `MAP_ROOT=/opt/fftai/nav/map` |

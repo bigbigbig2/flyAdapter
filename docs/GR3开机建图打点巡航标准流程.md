@@ -130,6 +130,8 @@ source /opt/fftai/humanoidnav/install/setup.bash
 ros2 service list | egrep "/GR301AA0025/(slam/load_map|slam/save_map|cancel_current_action|get_current_action)"
 ros2 action list | grep /GR301AA0025/navigate_to_pose
 timeout 5s ros2 topic echo /GR301AA0025/robot_pose --once
+ros2 topic info /GR301AA0025/robot_pose
+ros2 topic info /GR301AA0025/slam/mode_status
 ```
 
 继续条件：
@@ -137,8 +139,11 @@ timeout 5s ros2 topic echo /GR301AA0025/robot_pose --once
 ```plain
 能看到 /GR301AA0025/slam/load_map、/GR301AA0025/slam/save_map；
 能看到 /GR301AA0025/navigate_to_pose；
-/GR301AA0025/robot_pose 能输出一次。
+/GR301AA0025/robot_pose 能输出一次；
+/GR301AA0025/robot_pose 和 /GR301AA0025/slam/mode_status 的 Publisher count 大于 0。
 ```
+
+注意：这里只看到 service 名字还不够。ROS2 graph 里可能短时间看到接口名，但后端发布端还没 ready。必须同时确认 `robot_pose` 和 `slam/mode_status` 有 publisher 且能输出数据，再启动 Adapter。
 
 ---
 
@@ -190,6 +195,18 @@ curl http://127.0.0.1:8080/robot/workflow/status
 /robot/status 里的 ros.ready=true；
 motion_authority.policy=none。
 ```
+
+如果 `/robot/status` 的 `ros` 字段包含 `clients`，继续确认：
+
+```plain
+ros.clients.load_map.ready=true
+ros.clients.save_map.ready=true
+ros.clients.set_mode.ready=true
+```
+
+如果刚重启过 HumanoidNav，建议也重启 Adapter。Adapter 进程里的 ROS2 client 需要重新发现底层 service/topic；不要拿旧 Adapter 进程的状态判断新启动的 HumanoidNav。
+
+现场经验：如果 HumanoidNav 曾经处于半启动状态，例如只能看到 `/GR301AA0025/raw_client_node`，或者 `robot_pose`/`slam/mode_status` 的 Publisher count 为 0，此时启动过 Adapter，后续即使 HumanoidNav 恢复，也建议 kill 掉旧 Adapter 并重新启动。重启 Adapter 会重新创建 ROS2 node、service client、topic subscription，并清掉旧的 `last_error/current_map` 误导信息。
 
 Web 操作台：
 
@@ -358,6 +375,39 @@ curl -X POST http://127.0.0.1:8080/slam/relocation \
 Adapter 默认等待 `MAP_LOAD_TIMEOUT_SEC=10` 秒。如果返回 timeout，优先直接跑
 HumanoidNav 自带 `scripts/load_map.sh` 或直接 `ros2 service call`，确认底层
 `/slam/load_map` 是否能自己完成。
+
+判定是否加载成功时，以响应里的 `result.success` 为准：
+
+```plain
+result.success=true   加载接口成功返回
+result.success=false  本次加载失败，继续看 result.message
+```
+
+兼容响应顶层的 `map_file` 是 Adapter 当前记录的地图，失败时可能还是上一次建图或加载留下的旧值。失败响应里真正的本次目标看 `result.map_file`。例如顶层 `map_file=/opt/fftai/nav/hhhh`、但 `result.map_file=/opt/fftai/nav/map`，含义是“当前记录仍是 hhhh，本次尝试加载 map 失败”，不是加载成功。
+
+如果官方脚本返回：
+
+```plain
+fourier_msgs.srv.LoadMap_Response(result=0, message='Successfully loaded map and switched to localization mode')
+```
+
+但 Adapter 仍返回 `service timeout`，优先重启 Adapter 后再测：
+
+```bash
+cd ~/aurora_ws/flyAdapter || exit 1
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+source .venv/bin/activate
+./scripts/run_adapter.sh
+```
+
+然后查看：
+
+```bash
+curl http://127.0.0.1:8080/robot/status
+```
+
+重点确认 Adapter 进程视角下 `robot_pose` 新鲜、`slam_mode` 已更新、ROS clients 已 ready。若官方脚本能成功而 Adapter 仍超时，问题在 Adapter 进程的 ROS 环境或旧进程状态，不在地图文件。
 
 打开定位 RViz：
 
