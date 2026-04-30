@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import os
 from typing import Any, Callable
 
 from app.config import AppConfig
@@ -41,11 +42,23 @@ class RosBridge:
             self._thread.join(timeout=2.0)
 
     def diagnostics(self) -> dict[str, Any]:
+        clients: dict[str, Any] = {}
+        for name, client in self._clients.items():
+            try:
+                clients[name] = {
+                    "service": client.srv_name,
+                    "ready": bool(client.service_is_ready()),
+                }
+            except Exception as exc:
+                clients[name] = {"error": str(exc)}
         return {
             "available": self.available,
             "ready": self.ready,
             "namespace": self.config.ns,
             "error": self.error,
+            "ros_domain_id": os.getenv("ROS_DOMAIN_ID", ""),
+            "rmw_implementation": os.getenv("RMW_IMPLEMENTATION", ""),
+            "clients": clients,
         }
 
     def switch_mode(self, mode: str) -> dict[str, Any]:
@@ -311,7 +324,8 @@ class RosBridge:
         client = self._clients.get(client_name)
         if client is None:
             raise BridgeUnavailable(f"service client not ready: {client_name}")
-        if not client.wait_for_service(timeout_sec=2.0):
+        wait_sec = max(2.0, min(10.0, float(timeout_sec or 10.0)))
+        if not client.wait_for_service(timeout_sec=wait_sec):
             raise BridgeUnavailable(f"service unavailable: {client.srv_name}")
         future = client.call_async(req)
         result = self._wait_future(future, timeout_sec=timeout_sec)
