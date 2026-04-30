@@ -25,6 +25,8 @@ python -c "import numpy; import rclpy; print('PY_ROS_IMPORT_OK')"
 
 export MOTION_GUARD=none
 export AURORA_ENABLED=0
+export MAP_ROOT=/opt/fftai/nav/maps
+export DEFAULT_MAP_NAME=showroom_1f_20260429
 
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh
@@ -65,6 +67,7 @@ export AURORA_AGENT_URL=http://127.0.0.1:18080
 - 内部调试层：`/robot/...`
 - ROS2 桥接：HumanoidNav 的 topic/service/action
 - 运动控制策略：默认 `MOTION_GUARD=none`，建图/打点由遥控器控制，自动导航由 Nav2 goal 控制
+- 地图命名：统一使用 `map_name`，保存/加载路径解析为 `MAP_ROOT/map_name`；只有临时绕过统一目录时才传绝对 `map_path`
 - Aurora 桥接：可选。主 Adapter 只调用本地 Aurora Agent；Agent 独立运行在能 import Aurora SDK 且能 DDS 匹配 AuroraCore 的环境里
 - 本地数据：导航点、巡航文件、runtime 状态
 

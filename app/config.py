@@ -42,6 +42,7 @@ class AppConfig:
     namespace: str
     data_dir: Path
     map_root: Path
+    default_map_name: str
     default_map_path: str
     nav_points_file: Path
     show_cruise_dir: Path
@@ -65,6 +66,7 @@ class AppConfig:
     aurora_circuit_failure_threshold: int
     aurora_circuit_open_sec: float
     nav_goal_timeout_sec: float
+    map_save_timeout_sec: float
 
     @property
     def ns(self) -> str:
@@ -85,12 +87,22 @@ def load_config() -> AppConfig:
     ).expanduser()
     motion_guard = normalize_motion_guard(os.getenv("MOTION_GUARD", "none"))
 
+    map_root = Path(os.getenv("MAP_ROOT", "/opt/fftai/nav/maps")).expanduser()
+    default_map_name = os.getenv("DEFAULT_MAP_NAME", "map").strip() or "map"
+    default_map_path_raw = os.getenv("DEFAULT_MAP_PATH", "").strip()
+    if default_map_path_raw:
+        default_map_path_obj = Path(default_map_path_raw).expanduser()
+        default_map_path = str(default_map_path_obj if default_map_path_obj.is_absolute() else map_root / default_map_path_obj)
+    else:
+        default_map_path = str(map_root / default_map_name)
+
     return AppConfig(
         root_dir=root_dir,
         namespace=os.getenv("ROBOT_NAMESPACE", "GR301AA0025"),
         data_dir=data_dir,
-        map_root=Path(os.getenv("MAP_ROOT", "/opt/fftai/nav")).expanduser(),
-        default_map_path=os.getenv("DEFAULT_MAP_PATH", "/opt/fftai/nav/map"),
+        map_root=map_root,
+        default_map_name=default_map_name,
+        default_map_path=default_map_path,
         nav_points_file=nav_points_file,
         show_cruise_dir=Path(
             os.getenv("SHOW_CRUISE_DIR", data_dir / "show_cruises")
@@ -115,4 +127,5 @@ def load_config() -> AppConfig:
         aurora_circuit_failure_threshold=int(os.getenv("AURORA_CIRCUIT_FAILURE_THRESHOLD", "3")),
         aurora_circuit_open_sec=float(os.getenv("AURORA_CIRCUIT_OPEN_SEC", "5.0")),
         nav_goal_timeout_sec=float(os.getenv("NAV_GOAL_TIMEOUT_SEC", "300")),
+        map_save_timeout_sec=float(os.getenv("MAP_SAVE_TIMEOUT_SEC", "120")),
     )

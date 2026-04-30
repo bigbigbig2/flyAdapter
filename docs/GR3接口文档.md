@@ -12,6 +12,18 @@ http://机器人IP:8080
 /GR301AA0025
 ```
 
+地图保存统一规则：
+
+```plain
+MAP_ROOT=/opt/fftai/nav/maps
+DEFAULT_MAP_NAME=showroom_1f_20260429
+最终路径 = MAP_ROOT / map_name
+```
+
+所有地图接口都优先推荐传 `map_name`。例如 `showroom_1f_20260429`
+会解析为 `/opt/fftai/nav/maps/showroom_1f_20260429`。只有需要临时绕过
+统一目录时，才传绝对 `map_path`。
+
 ## 1. Unitree 兼容接口
 
 ### GET `/slam/status`
@@ -48,20 +60,28 @@ curl http://127.0.0.1:8080/slam/pose
 
 ### POST `/slam/start_mapping`
 
-切到建图模式。
+切到建图模式。可选传入本次建图的保存目标；开始建图时不会写文件，
+Adapter 只是先记录这个目标，真正落盘发生在 `/slam/stop_mapping`。
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/start_mapping
+curl -X POST http://127.0.0.1:8080/slam/start_mapping \
+  -H "Content-Type: application/json" \
+  -d '{"map_name":"showroom_1f_20260429"}'
 ```
+
+如果不传 `map_name` 或 `map_path`，停止建图时会使用当前记录的地图路径或
+`DEFAULT_MAP_PATH`。
 
 ### POST `/slam/stop_mapping`
 
-保存地图。兼容原工程误写的 `/aslam/stop_mapping`。
+保存地图。兼容原工程误写的 `/aslam/stop_mapping`。底层调用
+`/GR301AA0025/slam/save_map`，请求字段是 `map_id`；绝对路径会直接作为保存目录。
+保存 3D 点云地图可能耗时较长，Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=120` 秒。
 
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/map"}'
+  -d '{"map_name":"showroom_1f_20260429"}'
 ```
 
 ### POST `/slam/relocation`
@@ -71,7 +91,7 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
 ```
 
 ### POST `/slam/add_nav_point`
@@ -220,6 +240,17 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 聚合状态，包括 ROS、可选 Aurora 缓存、runtime、三类 readiness、运动控制策略。
 
+返回里包含 `map_config`，用于确认当前统一地图配置：
+
+```json
+{
+  "map_root": "/opt/fftai/nav/maps",
+  "default_map_name": "showroom_1f_20260429",
+  "default_map_path": "/opt/fftai/nav/maps/showroom_1f_20260429",
+  "current_map": "/opt/fftai/nav/maps/showroom_1f_20260429"
+}
+```
+
 ### GET `/robot/readiness`
 
 查看自动导航前预检。只有 `MOTION_GUARD=aurora` 或 `REQUIRE_AURORA=1` 时，Aurora 才会成为 blocker。
@@ -297,12 +328,12 @@ auto_navigation_motion=nav2_goal
 
 ### POST `/robot/map/load`
 
-直接按路径加载地图。
+加载地图。推荐传 `map_name`，也兼容绝对 `map_path`。
 
 ```bash
 curl -X POST http://127.0.0.1:8080/robot/map/load \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/map","x":0,"y":0,"yaw":0}'
+  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"yaw":0}'
 ```
 
 ### GET `/robot/localization/status`

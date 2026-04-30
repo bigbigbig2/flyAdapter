@@ -69,6 +69,7 @@ class RobotService:
             "localization_status": self._localization_status_for_display(snap),
             "last_error": snap["last_error"],
         }
+        status["map_config"] = self.map_config(snap=snap)
         status["ready_for_mapping"] = mapping_readiness["ready"]
         status["ready_for_poi"] = poi_readiness["ready"]
         status["ready_for_navigation"] = navigation_readiness["ready"]
@@ -91,6 +92,7 @@ class RobotService:
             "ros": self.ros.diagnostics(),
             "aurora": aurora,
             "runtime": snap,
+            "map_config": self.map_config(snap=snap),
             "motion_authority": motion_authority,
             "workflow": {
                 "manual_mapping": mapping_readiness,
@@ -138,10 +140,23 @@ class RobotService:
             "namespace": self.config.ns,
             "ros": self.ros.diagnostics(),
             "aurora": aurora,
+            "map_config": self.map_config(snap=snap),
             "motion_authority": motion_authority,
             "manual_mapping": mapping_readiness,
             "manual_poi": poi_readiness,
             "auto_navigation": navigation_readiness,
+        }
+
+    def map_config(self, snap: dict[str, Any] | None = None) -> dict[str, Any]:
+        snap = snap or self.state.snapshot()
+        current_map = snap["current_map"]
+        return {
+            "map_root": str(self.config.map_root),
+            "default_map_name": self.config.default_map_name,
+            "default_map_path": self.config.default_map_path,
+            "current_map": current_map,
+            "current_map_name": self.store.map_name_from_path(current_map),
+            "save_timeout_sec": self.config.map_save_timeout_sec,
         }
 
     def motion_authority(self, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -322,41 +337,96 @@ class RobotService:
             return {"ok": True, "readiness": readiness}
         return {"ok": False, "readiness": readiness}
 
-    def start_mapping(self) -> dict[str, Any]:
-        return self._safe_ros_call(lambda: self.ros.switch_mode("mapping"), "start_mapping")
+    def start_mapping(self, map_path: str | None = None, map_name: str | None = None) -> dict[str, Any]:
+        try:
+            target = self._resolve_map_target(map_path=map_path, map_name=map_name)
+        except (FileNotFoundError, ValueError) as exc:
+            return self._map_target_error(exc, "start_mapping")
+        result = self._safe_ros_call(lambda: self.ros.switch_mode("mapping"), "start_mapping")
+        if result.get("success", True):
+            self._record_current_map(target, map_name=map_name)
+        result["map_file"] = target
+        result["map_name"] = self.store.map_name_from_path(target)
+        result["save_timing"] = "map data is written when stop_mapping/save_map is called"
+        return result
 
-    def stop_mapping(self, map_path: str | None = None) -> dict[str, Any]:
-        target = map_path or self.state.snapshot()["current_map"] or self.config.default_map_path
+    def stop_mapping(self, map_path: str | None = None, map_name: str | None = None) -> dict[str, Any]:
+        try:
+            target = self._resolve_map_target(map_path=map_path, map_name=map_name)
+        except (FileNotFoundError, ValueError) as exc:
+            return self._map_target_error(exc, "stop_mapping")
         result = self._safe_ros_call(lambda: self.ros.save_map(target), "stop_mapping")
         result["map_file"] = target
+        result["map_name"] = self.store.map_name_from_path(target)
+        result["timeout_sec"] = self.config.map_save_timeout_sec
+        if result.get("success", True):
+            self._record_current_map(target, map_name=map_name)
         return result
 
     def set_map_path(self, path: str) -> dict[str, Any]:
-        self.state.current_map = path
-        runtime = self.store.load_runtime()
-        runtime["current_map"] = path
-        self.store.save_runtime(runtime)
+        try:
+            target = self._resolve_map_target(map_path=path)
+        except (FileNotFoundError, ValueError) as exc:
+            error = self._map_target_error(exc, "set_map_path")
+            return {**self.legacy_status(), "result": error}
+        self._record_current_map(target)
         return self.legacy_status()
 
     def relocation(
         self,
         map_path: str | None = None,
+        map_name: str | None = None,
         x: float = 0.0,
         y: float = 0.0,
         z: float = 0.0,
         yaw: float = 0.0,
         wait_for_localization: bool = False,
     ) -> dict[str, Any]:
-        path = map_path or self.state.snapshot()["current_map"] or self.config.default_map_path
+        try:
+            path = self._resolve_map_target(map_path=map_path, map_name=map_name, require_exists=True)
+        except (FileNotFoundError, ValueError) as exc:
+            error = self._map_target_error(exc, "relocation")
+            return {**self.legacy_status(), "result": error}
         result = self._safe_ros_call(lambda: self.ros.load_map(path, x=x, y=y, z=z, yaw=yaw), "relocation")
         if result.get("success", True):
-            self.state.current_map = path
-            runtime = self.store.load_runtime()
-            runtime["current_map"] = path
-            self.store.save_runtime(runtime)
+            self._record_current_map(path, map_name=map_name)
         if wait_for_localization:
             result["wait"] = self.wait_for_localization()
         return {**self.legacy_status(), "result": result}
+
+    def _resolve_map_target(
+        self,
+        map_path: str | None = None,
+        map_name: str | None = None,
+        fallback_current: bool = True,
+        require_exists: bool = False,
+    ) -> str:
+        raw_path = str(map_path or "").strip()
+        raw_name = str(map_name or "").strip()
+        if raw_path:
+            return self.store.resolve_map_reference(raw_path, require_exists=require_exists)
+        if raw_name:
+            return self.store.resolve_map_reference(raw_name, require_exists=require_exists)
+        if fallback_current and self.state.snapshot()["current_map"]:
+            if require_exists:
+                return self.store.resolve_map_reference(self.state.snapshot()["current_map"], require_exists=True)
+            return self.state.snapshot()["current_map"]
+        if require_exists:
+            return self.store.resolve_map_reference(self.config.default_map_path, require_exists=True)
+        return self.config.default_map_path
+
+    def _map_target_error(self, exc: Exception, action_name: str) -> dict[str, Any]:
+        status_code = 404 if isinstance(exc, FileNotFoundError) else 400
+        self.state.mark_error(str(exc), status_code=status_code)
+        return {"success": False, "message": str(exc), "action": action_name, "status_code": status_code}
+
+    def _record_current_map(self, path: str, map_name: str | None = None) -> None:
+        self.state.current_map = path
+        runtime = self.store.load_runtime()
+        runtime["current_map"] = path
+        runtime["current_map_name"] = map_name or self.store.map_name_from_path(path)
+        runtime["map_root"] = str(self.config.map_root)
+        self.store.save_runtime(runtime)
 
     def wait_for_localization(self, timeout_sec: float = 30.0) -> dict[str, Any]:
         start = time.monotonic()
@@ -389,7 +459,7 @@ class RobotService:
     def load_nav_points(self) -> dict[str, Any]:
         points, map_file, _ = self.store.load_nav_points()
         if map_file:
-            self.state.current_map = map_file
+            self._record_current_map(map_file)
         self.state.total_nav_points = len(points)
         return self.legacy_status()
 
@@ -407,7 +477,7 @@ class RobotService:
             return {"success": False, "message": str(exc), "status_code": 404}
         self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
         if map_file:
-            self.state.current_map = map_file
+            self._record_current_map(map_file)
         self.state.current_nav_name = name
         self.state.total_nav_points = len(points)
         return self.legacy_status()
@@ -533,7 +603,12 @@ class RobotService:
         return response
 
     def list_maps(self) -> dict[str, Any]:
-        return {"maps": self.store.list_maps(), "current_map": self.state.snapshot()["current_map"]}
+        snap = self.state.snapshot()
+        return {
+            "maps": self.store.list_maps(),
+            "current_map": snap["current_map"],
+            "map_config": self.map_config(snap=snap),
+        }
 
     def load_map_by_name(self, map_name: str, x: float, y: float, z: float, yaw: float, wait: bool) -> dict[str, Any]:
         try:

@@ -38,7 +38,8 @@ class PoseIn(BaseModel):
 
 
 class RelocationRequest(BaseModel):
-    map_path: str | None = Field(default=None, description="地图目录路径，例如 /opt/fftai/nav/map")
+    map_path: str | None = Field(default=None, description="地图绝对路径，例如 /opt/fftai/nav/maps/office_a")
+    map_name: str | None = Field(default=None, description="MAP_ROOT 下的地图目录名；未传 map_path 时使用")
     path: str | None = Field(default=None, description="兼容字段，等同于 map_path")
     init_pose: PoseIn | None = Field(default=None, description="加载地图后的初始位姿")
     x: float | None = Field(default=None, description="兼容旧接口的初始 x 坐标")
@@ -53,7 +54,9 @@ class AddNavPointRequest(BaseModel):
 
 
 class SetMapPathRequest(BaseModel):
-    path: str = Field(description="只写入适配层 runtime 的地图路径")
+    path: str | None = Field(default=None, description="兼容字段，等同于 map_path")
+    map_path: str | None = Field(default=None, description="地图绝对路径；为空时可使用 map_name")
+    map_name: str | None = Field(default=None, description="MAP_ROOT 下的地图目录名")
 
 
 class NavigateToRequest(PoseIn):
@@ -80,7 +83,8 @@ class MapSaveRequest(BaseModel):
 
 
 class MapLoadRequest(BaseModel):
-    map_path: str = Field(description="地图目录路径，例如 /opt/fftai/nav/map")
+    map_path: str | None = Field(default=None, description="地图绝对路径；为空时可使用 map_name")
+    map_name: str | None = Field(default=None, description="MAP_ROOT 下的地图目录名")
     x: float = Field(default=0.0, description="加载地图后的初始 x 坐标")
     y: float = Field(default=0.0, description="加载地图后的初始 y 坐标")
     z: float = Field(default=0.0, description="加载地图后的初始 z 坐标")

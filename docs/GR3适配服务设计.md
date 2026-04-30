@@ -219,6 +219,18 @@ gr3/data
 - `routes.json`：route / mission 数据。
 - `show_cruises/*.json`：`/slam/start_show_cruise` 使用的巡航文件。
 
+地图路径统一规则：
+
+```plain
+MAP_ROOT=/opt/fftai/nav/maps
+DEFAULT_MAP_NAME=showroom_1f_20260429
+map_name=office_a -> /opt/fftai/nav/maps/office_a
+```
+
+API 优先使用 `map_name`，Adapter 统一解析成绝对路径后再传给
+HumanoidNav 的 `SaveMap.map_id` 或 `LoadMap.map_path`。只有需要临时保存到
+统一目录之外时才传绝对 `map_path`。
+
 `navigation_points.json` 格式：
 
 ```json

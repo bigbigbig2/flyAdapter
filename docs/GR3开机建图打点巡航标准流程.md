@@ -10,7 +10,9 @@
 机器人命名空间：GR301AA0025
 工程目录：~/aurora_ws/flyAdapter
 Adapter 地址：http://127.0.0.1:8080
-地图示例路径：/opt/fftai/nav/maps/showroom_1f_20260429
+地图根目录：/opt/fftai/nav/maps
+地图名称示例：showroom_1f_20260429
+地图最终路径：/opt/fftai/nav/maps/showroom_1f_20260429
 ```
 
 外部电脑访问时，把 `127.0.0.1` 换成机器人 IP；机器人本机终端里继续使用 `127.0.0.1`。
@@ -152,6 +154,8 @@ source /opt/fftai/humanoidnav/install/setup.bash
 source .venv/bin/activate
 
 export ROBOT_NAMESPACE=GR301AA0025
+export MAP_ROOT=/opt/fftai/nav/maps
+export DEFAULT_MAP_NAME=showroom_1f_20260429
 export MOTION_GUARD=none
 export AURORA_ENABLED=0
 
@@ -203,10 +207,16 @@ http://127.0.0.1:8080/docs
 终端 4：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/slam/start_mapping
+curl -X POST http://127.0.0.1:8080/slam/start_mapping \
+  -H "Content-Type: application/json" \
+  -d '{"map_name":"showroom_1f_20260429"}'
 curl http://127.0.0.1:8080/robot/readiness/mapping
 curl http://127.0.0.1:8080/slam/status
 ```
+
+说明：开始建图只切换 HumanoidNav 到 mapping 模式，不会立刻创建地图文件。
+这里传入的 `map_name` 会按 `MAP_ROOT/map_name` 解析成本次建图的保存目标，
+实际写入发生在停止建图并保存时。只有临时绕过统一目录时，才传绝对 `map_path`。
 
 建图模式下，下面这些是正常的：
 
@@ -306,8 +316,11 @@ health.has_error=false
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/maps/showroom_1f_20260429"}'
+  -d '{"map_name":"showroom_1f_20260429"}'
 ```
+
+保存 3D 点云地图可能需要几十秒；Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=120` 秒。
+如果仍然超时，优先在 HumanoidNav 终端看 `/slam/save_map` 是否仍在写盘、地图数据是否为空、目标磁盘是否可写。
 
 检查地图：
 
@@ -333,7 +346,7 @@ ls -lah /opt/fftai/nav/maps/showroom_1f_20260429
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_path":"/opt/fftai/nav/maps/showroom_1f_20260429","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":true}'
+  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":true}'
 ```
 
 打开定位 RViz：

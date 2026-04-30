@@ -10,35 +10,35 @@
   <header class="topbar">
     <div class="brand">
       <h1>GR3 现场操作台</h1>
-      <p>GR301AA0025 · http://127.0.0.1:8080</p>
+      <span>GR301AA0025</span>
     </div>
     <div class="top-actions">
-      <a class="link-btn" href="/docs" target="_blank" rel="noreferrer">Swagger</a>
+      <a class="btn ghost" href="/docs" target="_blank" rel="noreferrer">Swagger</a>
       <button id="refreshBtn" class="btn">刷新</button>
-      <div class="status-strip">
+      <div class="online-pill" aria-live="polite">
         <span id="adapterDot" class="dot"></span>
         <span id="adapterText">检查中</span>
       </div>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="overview">
+  <main class="page">
+    <section class="overview" aria-label="总览">
+      <div class="metric">
+        <span>Adapter</span>
+        <strong id="adapterStatus">-</strong>
+      </div>
       <div class="metric">
         <span>ROS</span>
         <strong id="rosStatus">-</strong>
       </div>
       <div class="metric">
-        <span>运动策略 / Aurora</span>
-        <strong id="auroraStatus">-</strong>
+        <span>运动策略</span>
+        <strong id="motionStatus">-</strong>
       </div>
       <div class="metric">
         <span>SLAM</span>
         <strong id="slamStatus">-</strong>
-      </div>
-      <div class="metric">
-        <span>建图就绪</span>
-        <strong id="mappingReady">-</strong>
       </div>
       <div class="metric">
         <span>导航就绪</span>
@@ -50,46 +50,65 @@
       </div>
     </section>
 
-    <div class="app-shell">
-      <aside class="workflow">
+    <section class="map-bar" aria-label="地图参数">
+      <label class="field">
+        <span>地图名称</span>
+        <input id="mapName" placeholder="showroom_1f_20260429" autocomplete="off" />
+      </label>
+      <label class="field grow">
+        <span>绝对路径覆盖</span>
+        <input id="mapPath" placeholder="为空时使用 MAP_ROOT/地图名称" autocomplete="off" />
+      </label>
+      <div class="quick-state">
+        <span>位姿</span>
+        <strong id="poseAge">-</strong>
+      </div>
+      <div class="quick-state">
+        <span>任务</span>
+        <strong id="navTask">-</strong>
+      </div>
+    </section>
+
+    <div class="shell">
+      <aside class="workflow" aria-label="流程">
         <button class="step active" data-step="check">
           <span class="step-index">1</span>
-          <span>启动检查</span>
+          <span class="step-title">启动检查</span>
           <small id="stepCheckState">待检查</small>
         </button>
         <button class="step" data-step="mapping">
           <span class="step-index">2</span>
-          <span>建图</span>
+          <span class="step-title">建图</span>
           <small id="stepMappingState">待开始</small>
         </button>
         <button class="step" data-step="save">
           <span class="step-index">3</span>
-          <span>保存地图</span>
+          <span class="step-title">保存地图</span>
           <small id="stepSaveState">待保存</small>
         </button>
         <button class="step" data-step="localization">
           <span class="step-index">4</span>
-          <span>定位</span>
+          <span class="step-title">定位</span>
           <small id="stepLocalizationState">待加载</small>
         </button>
         <button class="step" data-step="points">
           <span class="step-index">5</span>
-          <span>打点</span>
+          <span class="step-title">打点</span>
           <small id="stepPointsState">0 点</small>
         </button>
         <button class="step" data-step="verify">
           <span class="step-index">6</span>
-          <span>单点验证</span>
+          <span class="step-title">单点验证</span>
           <small id="stepVerifyState">待选择</small>
         </button>
         <button class="step" data-step="cruise">
           <span class="step-index">7</span>
-          <span>巡航</span>
+          <span class="step-title">巡航</span>
           <small id="stepCruiseState">待启动</small>
         </button>
         <button class="step" data-step="acceptance">
           <span class="step-index">8</span>
-          <span>验收</span>
+          <span class="step-title">验收</span>
           <small id="stepAcceptanceState">待检查</small>
         </button>
       </aside>
@@ -99,20 +118,25 @@
           <div class="panel-head">
             <div>
               <h2>启动检查</h2>
-              <p>确认 Adapter 和 ROS；Aurora 只在运动策略配置为 aurora 时作为自动导航保护项。</p>
+              <p id="healthLine">等待状态刷新</p>
             </div>
-            <button id="runAcceptanceTopBtn" class="btn primary">运行验收检查</button>
+            <button id="runAcceptanceTopBtn" class="btn primary">验收检查</button>
           </div>
+
           <div class="status-grid">
             <div class="status-box"><span>Adapter</span><strong id="checkAdapter">-</strong></div>
             <div class="status-box"><span>ROS Bridge</span><strong id="checkRos">-</strong></div>
-            <div class="status-box"><span>Aurora 策略</span><strong id="checkAurora">-</strong></div>
-            <div class="status-box"><span>运动控制权</span><strong id="checkBody">-</strong></div>
+            <div class="status-box"><span>建图</span><strong id="checkMapping">-</strong></div>
+            <div class="status-box"><span>打点</span><strong id="checkPoi">-</strong></div>
+            <div class="status-box"><span>自动导航</span><strong id="checkNavigation">-</strong></div>
+            <div class="status-box"><span>Aurora</span><strong id="checkAurora">-</strong></div>
+            <div class="status-box wide"><span>控制权</span><strong id="checkBody">-</strong></div>
           </div>
-          <div class="actions">
-            <button id="ensureStandBtn" class="btn primary">可选：Aurora 站立</button>
-            <button id="stopMotionBtn" class="btn danger">可选：Aurora 停止</button>
-            <button id="auroraResetBtn" class="btn">可选：重置 Aurora</button>
+
+          <div class="toolbar">
+            <button id="ensureStandBtn" class="btn primary">Aurora 站立</button>
+            <button id="stopMotionBtn" class="btn danger">Aurora 停止</button>
+            <button id="auroraResetBtn" class="btn">重置 Aurora</button>
           </div>
           <pre id="readinessBox" class="console"></pre>
         </section>
@@ -121,23 +145,23 @@
           <div class="panel-head">
             <div>
               <h2>建图</h2>
-              <p>开启 mapping 后，用手柄低速带机器人走完整路线。</p>
+              <p>手动运动阶段</p>
             </div>
-            <span id="mappingHint" class="badge">未开始</span>
+            <span id="mappingHint" class="badge">待确认</span>
           </div>
-          <label>地图保存路径</label>
-          <input id="mapPath" value="/opt/fftai/nav/maps/showroom_1f_20260429" />
-          <div class="actions">
+
+          <div class="toolbar">
             <button id="startMappingBtn" class="btn primary">开始建图</button>
-            <button id="mappingStatusBtn" class="btn">刷新建图状态</button>
-            <button id="copyMappingRvizBtn" class="btn">复制建图 RViz 命令</button>
+            <button id="mappingStatusBtn" class="btn">刷新状态</button>
+            <button id="copyMappingRvizBtn" class="btn">复制 RViz 命令</button>
           </div>
           <pre id="mappingRvizCommand" class="command">cd ~/aurora_ws/flyAdapter || exit 1
 ./scripts/open_rviz.sh mapping</pre>
+
           <div class="status-grid">
-            <div class="status-box"><span>建图模式</span><strong id="mappingModeCheck">-</strong></div>
-            <div class="status-box"><span>位姿刷新</span><strong id="mappingPoseCheck">-</strong></div>
-            <div class="status-box"><span>健康状态</span><strong id="mappingHealthCheck">-</strong></div>
+            <div class="status-box"><span>模式</span><strong id="mappingModeCheck">-</strong></div>
+            <div class="status-box"><span>位姿</span><strong id="mappingPoseCheck">-</strong></div>
+            <div class="status-box"><span>健康</span><strong id="mappingHealthCheck">-</strong></div>
             <div class="status-box"><span>控制源</span><strong id="mappingControlSource">-</strong></div>
           </div>
           <pre id="mappingBox" class="console compact"></pre>
@@ -147,13 +171,15 @@
           <div class="panel-head">
             <div>
               <h2>保存地图</h2>
-              <p>建图路线闭环后保存地图，并检查地图列表。</p>
+              <p id="saveNote">地图保存路径使用顶部输入框</p>
             </div>
             <span id="saveHint" class="badge">待保存</span>
           </div>
-          <div class="actions">
+
+          <div class="toolbar">
             <button id="stopMappingBtn" class="btn primary">停止建图并保存</button>
             <button id="saveMapBtn" class="btn">保存当前地图</button>
+            <button id="setMapPathBtn" class="btn">仅记录路径</button>
             <button id="listMapsBtn" class="btn">列出地图</button>
           </div>
           <pre id="mapListBox" class="console"></pre>
@@ -163,20 +189,31 @@
           <div class="panel-head">
             <div>
               <h2>定位</h2>
-              <p>加载地图进入 localization，导航前必须定位良好。</p>
+              <p>加载地图后进入 localization</p>
             </div>
             <span id="localizationHint" class="badge">待加载</span>
           </div>
-          <div class="split">
-            <label>X<input id="initX" type="number" value="0" step="0.1" /></label>
-            <label>Y<input id="initY" type="number" value="0" step="0.1" /></label>
-            <label>Yaw<input id="initYaw" type="number" value="0" step="0.1" /></label>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>X</span>
+              <input id="initX" type="number" value="0" step="0.1" />
+            </label>
+            <label class="field">
+              <span>Y</span>
+              <input id="initY" type="number" value="0" step="0.1" />
+            </label>
+            <label class="field">
+              <span>Yaw</span>
+              <input id="initYaw" type="number" value="0" step="0.1" />
+            </label>
           </div>
-          <div class="actions">
+
+          <div class="toolbar">
             <button id="loadMapBtn" class="btn primary">加载地图定位</button>
             <button id="initialPoseBtn" class="btn">发布初始位姿</button>
-            <button id="localizationStatusBtn" class="btn">刷新定位状态</button>
-            <button id="copyLocalizationRvizBtn" class="btn">复制定位 RViz 命令</button>
+            <button id="localizationStatusBtn" class="btn">刷新状态</button>
+            <button id="copyLocalizationRvizBtn" class="btn">复制 RViz 命令</button>
           </div>
           <pre id="localizationRvizCommand" class="command">cd ~/aurora_ws/flyAdapter || exit 1
 ./scripts/open_rviz.sh relocation</pre>
@@ -187,32 +224,51 @@
           <div class="panel-head">
             <div>
               <h2>打点</h2>
-              <p>机器人停稳后保存当前位置，正式巡航前保存点位文件。</p>
+              <p id="pointsSummary">暂无点位</p>
             </div>
             <span id="pointsHint" class="badge">0 点</span>
           </div>
-          <label>点位名称</label>
-          <input id="pointName" value="lobby_01_start" />
-          <div class="actions">
+
+          <div class="form-grid two">
+            <label class="field">
+              <span>点位名称</span>
+              <input id="pointName" value="lobby_01_start" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>搜索点位</span>
+              <input id="pointSearch" placeholder="按名称过滤" autocomplete="off" />
+            </label>
+          </div>
+
+          <div id="duplicateNotice" class="notice hidden"></div>
+          <div class="toolbar">
             <button id="savePointBtn" class="btn primary">保存当前位置</button>
             <button id="savePointsFileBtn" class="btn">保存点位文件</button>
             <button id="reloadPointsBtn" class="btn">刷新点位</button>
             <button id="clearPointsBtn" class="btn danger">清空点位</button>
           </div>
-          <div id="pointsList" class="list"></div>
+          <div id="pointsList" class="point-list" aria-live="polite"></div>
         </section>
 
         <section class="step-panel" data-panel="verify">
           <div class="panel-head">
             <div>
               <h2>单点验证</h2>
-              <p>先逐个验证关键点，再进入完整巡航。</p>
+              <p id="verifySummary">未选择目标</p>
             </div>
             <span id="verifyHint" class="badge">待选择</span>
           </div>
-          <label>目标点位</label>
-          <select id="poiSelect"></select>
-          <div class="actions">
+
+          <label class="field">
+            <span>目标点位</span>
+            <select id="poiSelect"></select>
+          </label>
+          <label class="switch">
+            <input id="forceNav" type="checkbox" />
+            <span>强制下发</span>
+          </label>
+
+          <div class="toolbar">
             <button id="gotoPoiBtn" class="btn primary">导航到点位</button>
             <button id="cancelNavBtn" class="btn danger">取消导航</button>
             <button id="currentActionBtn" class="btn">当前动作</button>
@@ -224,11 +280,16 @@
           <div class="panel-head">
             <div>
               <h2>巡航</h2>
-              <p>按点位顺序执行，先短路线再完整路线。</p>
+              <p id="cruiseSummary">未启动</p>
             </div>
             <span id="cruiseHint" class="badge">待启动</span>
           </div>
-          <div class="actions">
+
+          <label class="switch">
+            <input id="forceCruise" type="checkbox" />
+            <span>强制开始</span>
+          </label>
+          <div class="toolbar">
             <button id="startCruiseBtn" class="btn primary">开始巡航</button>
             <button id="pauseBtn" class="btn">暂停</button>
             <button id="resumeBtn" class="btn">恢复</button>
@@ -243,7 +304,7 @@
           <div class="panel-head">
             <div>
               <h2>验收</h2>
-              <p>接背包前跑一遍关键检查。</p>
+              <p id="acceptanceSummary">待检查</p>
             </div>
             <button id="runAcceptanceBtn" class="btn primary">运行检查</button>
           </div>
@@ -254,14 +315,14 @@
     </div>
 
     <section class="response-area">
-      <div>
+      <div class="response-panel">
         <div class="section-head">
           <h2>最后响应</h2>
           <button id="clearResponseBtn" class="btn">清空</button>
         </div>
         <pre id="lastResponse" class="console"></pre>
       </div>
-      <div>
+      <div class="response-panel">
         <div class="section-head">
           <h2>操作记录</h2>
           <button id="clearLogBtn" class="btn">清空</button>

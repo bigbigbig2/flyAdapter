@@ -104,20 +104,27 @@ def map_list(request: Request) -> dict:
 @router.get("/map/current", summary="查询当前地图")
 def map_current(request: Request) -> dict:
     """返回适配层 runtime 里记录的当前地图路径。"""
-    return {"current_map": service(request).state.snapshot()["current_map"]}
+    return service(request).map_config()
+
+
+@router.get("/map/config", summary="查询地图保存配置")
+def map_config(request: Request) -> dict:
+    """返回 MAP_ROOT、默认地图名、默认保存路径和当前地图。"""
+    return service(request).map_config()
 
 
 @router.post("/map/save", summary="保存当前地图")
 def map_save(request: Request, body: MapSaveRequest) -> dict:
     """调用 HumanoidNav `/slam/save_map`，保存当前建图结果。"""
-    return service(request).stop_mapping(body.map_path or body.map_name)
+    return service(request).stop_mapping(map_path=body.map_path, map_name=body.map_name)
 
 
 @router.post("/map/load", summary="按路径加载地图")
 def map_load(request: Request, body: MapLoadRequest) -> dict:
     """调用 HumanoidNav `/slam/load_map`，加载地图并进入 localization。"""
     return service(request).relocation(
-        body.map_path,
+        map_path=body.map_path,
+        map_name=body.map_name,
         x=body.x,
         y=body.y,
         z=body.z,

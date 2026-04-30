@@ -81,16 +81,39 @@ class JsonStore:
         return maps
 
     def resolve_map_name(self, name: str) -> str:
-        safe_name = self._safe_name(name)
+        return self.resolve_map_reference(name, require_exists=True)
+
+    def resolve_map_reference(self, value: str, require_exists: bool = False) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError("map name/path is empty")
+        path = Path(raw).expanduser()
+        if path.is_absolute():
+            if require_exists and not path.exists():
+                raise FileNotFoundError(f"map not found: {raw}")
+            return str(path)
+
+        safe_name = self._safe_name(raw)
         root = self.config.map_root.resolve()
         path = (root / safe_name).resolve()
         try:
             path.relative_to(root)
         except ValueError as exc:
-            raise ValueError(f"map path escaped MAP_ROOT: {name}") from exc
-        if not path.exists():
-            raise FileNotFoundError(f"map not found: {name}")
+            raise ValueError(f"map path escaped MAP_ROOT: {raw}") from exc
+        if require_exists and not path.exists():
+            raise FileNotFoundError(f"map not found: {raw}")
         return str(path)
+
+    def map_name_from_path(self, path: str) -> str:
+        raw = str(path or "").strip()
+        if not raw:
+            return ""
+        try:
+            root = self.config.map_root.resolve()
+            target = Path(raw).expanduser().resolve()
+            return str(target.relative_to(root)).replace("\\", "/")
+        except Exception:
+            return Path(raw).name
 
     def load_routes(self) -> dict[str, Any]:
         return self._read_json(self.routes_file, {"routes": []})

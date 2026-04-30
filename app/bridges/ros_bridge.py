@@ -68,7 +68,16 @@ class RosBridge:
         SaveMap = self._require_type("SaveMap")
         req = SaveMap.Request()
         req.map_id = map_id
-        return self._call_service("save_map", req)
+        result = self._call_service("save_map", req, timeout_sec=self.config.map_save_timeout_sec)
+        if "response" in result:
+            try:
+                code = int(result.get("response", -1))
+            except (TypeError, ValueError):
+                code = -1
+            result["success"] = code == 0
+            result["status_code"] = code
+            result.setdefault("message", self._save_map_response_message(code))
+        return result
 
     def cancel_current_action(self) -> dict[str, Any]:
         CancelCurrentAction = self._require_type("CancelCurrentAction")
@@ -320,6 +329,16 @@ class RosBridge:
             else:
                 data[name] = str(value)
         return data
+
+    @staticmethod
+    def _save_map_response_message(code: int) -> str:
+        return {
+            0: "map saved",
+            1: "save_map already running",
+            2: "image render reset failed",
+            3: "map data is empty",
+            4: "localization expansion failed",
+        }.get(code, f"save_map returned {code}")
 
     @staticmethod
     def _wait_future(future: Any, timeout_sec: float | None) -> Any:

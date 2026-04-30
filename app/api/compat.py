@@ -37,9 +37,18 @@ def slam_pose(request: Request) -> dict:
 
 
 @router.post("/slam/start_mapping", summary="开始建图模式")
-def start_mapping(request: Request) -> dict:
-    """调用 HumanoidNav `/slam/set_mode` 切换到 mapping，用于开始建图流程。"""
-    result = service(request).start_mapping()
+def start_mapping(request: Request, body: dict | None = Body(default=None)) -> dict:
+    """调用 HumanoidNav `/slam/set_mode` 切换到 mapping，用于开始建图流程。
+
+    可选传入 `map_path`/`path`/`map_file` 作为本次建图的保存目标。底层
+    HumanoidNav 开始建图接口不写文件，真正落盘仍发生在 `/slam/stop_mapping`。
+    """
+    map_path = None
+    map_name = None
+    if body:
+        map_path = body.get("map_path") or body.get("path") or body.get("map_file")
+        map_name = body.get("map_name")
+    result = service(request).start_mapping(map_path=map_path, map_name=map_name)
     return {**service(request).legacy_status(), "result": result}
 
 
@@ -48,9 +57,11 @@ def start_mapping(request: Request) -> dict:
 def stop_mapping(request: Request, body: dict | None = Body(default=None)) -> dict:
     """调用 HumanoidNav `/slam/save_map` 保存地图，同时兼容原 Unitree 工程中的 `/aslam/stop_mapping` 误拼写。"""
     map_path = None
+    map_name = None
     if body:
         map_path = body.get("map_path") or body.get("path") or body.get("map_file")
-    result = service(request).stop_mapping(map_path)
+        map_name = body.get("map_name")
+    result = service(request).stop_mapping(map_path=map_path, map_name=map_name)
     return {**service(request).legacy_status(), "result": result}
 
 
@@ -65,6 +76,7 @@ def relocation(request: Request, body: RelocationRequest | None = Body(default=N
     yaw = body.yaw if body.yaw is not None else (init_pose.yaw if init_pose and init_pose.yaw is not None else 0.0)
     return service(request).relocation(
         map_path=body.map_path or body.path,
+        map_name=body.map_name,
         x=x,
         y=y,
         z=z,
@@ -139,7 +151,7 @@ def resume_nav(request: Request) -> dict:
 @router.post("/slam/set_map_path", summary="设置当前地图路径")
 def set_map_path(request: Request, body: SetMapPathRequest) -> dict:
     """只更新适配层 runtime 里的当前地图路径，不等价于底层 load_map。"""
-    return service(request).set_map_path(body.path)
+    return service(request).set_map_path(body.map_path or body.path or body.map_name or "")
 
 
 @router.post("/slam/navigate_to", summary="导航到指定坐标")
