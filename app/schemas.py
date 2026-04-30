@@ -38,7 +38,7 @@ class PoseIn(BaseModel):
 
 
 class RelocationRequest(BaseModel):
-    map_path: str | None = Field(default=None, description="地图绝对路径，例如 /opt/fftai/nav/maps/office_a")
+    map_path: str | None = Field(default=None, description="地图绝对路径，例如 /opt/fftai/nav/map")
     map_name: str | None = Field(default=None, description="MAP_ROOT 下的地图目录名；未传 map_path 时使用")
     path: str | None = Field(default=None, description="兼容字段，等同于 map_path")
     init_pose: PoseIn | None = Field(default=None, description="加载地图后的初始位姿")

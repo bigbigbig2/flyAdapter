@@ -87,7 +87,7 @@ def load_config() -> AppConfig:
     ).expanduser()
     motion_guard = normalize_motion_guard(os.getenv("MOTION_GUARD", "none"))
 
-    map_root = Path(os.getenv("MAP_ROOT", "/opt/fftai/nav/maps")).expanduser()
+    map_root = Path(os.getenv("MAP_ROOT", "/opt/fftai/nav")).expanduser()
     default_map_name = os.getenv("DEFAULT_MAP_NAME", "map").strip() or "map"
     default_map_path_raw = os.getenv("DEFAULT_MAP_PATH", "").strip()
     if default_map_path_raw:

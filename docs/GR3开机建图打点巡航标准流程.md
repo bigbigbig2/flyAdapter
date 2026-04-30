@@ -10,9 +10,9 @@
 机器人命名空间：GR301AA0025
 工程目录：~/aurora_ws/flyAdapter
 Adapter 地址：http://127.0.0.1:8080
-地图根目录：/opt/fftai/nav/maps
-地图名称示例：showroom_1f_20260429
-地图最终路径：/opt/fftai/nav/maps/showroom_1f_20260429
+地图根目录：/opt/fftai/nav
+地图名称示例：map
+地图最终路径：/opt/fftai/nav/map
 ```
 
 外部电脑访问时，把 `127.0.0.1` 换成机器人 IP；机器人本机终端里继续使用 `127.0.0.1`。
@@ -154,8 +154,8 @@ source /opt/fftai/humanoidnav/install/setup.bash
 source .venv/bin/activate
 
 export ROBOT_NAMESPACE=GR301AA0025
-export MAP_ROOT=/opt/fftai/nav/maps
-export DEFAULT_MAP_NAME=showroom_1f_20260429
+export MAP_ROOT=/opt/fftai/nav
+export DEFAULT_MAP_NAME=map
 export MOTION_GUARD=none
 export AURORA_ENABLED=0
 
@@ -209,7 +209,7 @@ http://127.0.0.1:8080/docs
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/start_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429"}'
+  -d '{"map_name":"map"}'
 curl http://127.0.0.1:8080/robot/readiness/mapping
 curl http://127.0.0.1:8080/slam/status
 ```
@@ -316,7 +316,7 @@ health.has_error=false
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429"}'
+  -d '{"map_name":"map"}'
 ```
 
 保存 3D 点云地图可能需要几十秒；Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=120` 秒。
@@ -326,7 +326,7 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
 
 ```bash
 curl http://127.0.0.1:8080/robot/map/list
-ls -lah /opt/fftai/nav/maps/showroom_1f_20260429
+ls -lah /opt/fftai/nav/map
 ```
 
 继续条件：
@@ -346,7 +346,7 @@ ls -lah /opt/fftai/nav/maps/showroom_1f_20260429
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":true}'
+  -d '{"map_name":"map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":true}'
 ```
 
 打开定位 RViz：

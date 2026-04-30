@@ -16,9 +16,9 @@ let lastSlamStatus = {};
 let lastPoints = [];
 let lastPointIssues = { duplicateNames: [], duplicateCount: 0 };
 let currentMapConfig = {
-  map_root: "/opt/fftai/nav/maps",
-  default_map_name: "showroom_1f_20260429",
-  default_map_path: "/opt/fftai/nav/maps/showroom_1f_20260429",
+  map_root: "/opt/fftai/nav",
+  default_map_name: "map",
+  default_map_path: "/opt/fftai/nav/map",
   save_timeout_sec: 120,
 };
 
@@ -206,7 +206,7 @@ function mapSaveTimeoutMs() {
 }
 
 function joinMapPath(root, name) {
-  const cleanRoot = String(root || "/opt/fftai/nav/maps").replace(/[\\/]+$/, "");
+  const cleanRoot = String(root || "/opt/fftai/nav").replace(/[\\/]+$/, "");
   const cleanName = String(name || "map").replace(/^[\\/]+|[\\/]+$/g, "");
   return `${cleanRoot}/${cleanName}`;
 }

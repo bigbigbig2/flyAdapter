@@ -15,13 +15,13 @@ http://机器人IP:8080
 地图保存统一规则：
 
 ```plain
-MAP_ROOT=/opt/fftai/nav/maps
-DEFAULT_MAP_NAME=showroom_1f_20260429
+MAP_ROOT=/opt/fftai/nav
+DEFAULT_MAP_NAME=map
 最终路径 = MAP_ROOT / map_name
 ```
 
-所有地图接口都优先推荐传 `map_name`。例如 `showroom_1f_20260429`
-会解析为 `/opt/fftai/nav/maps/showroom_1f_20260429`。只有需要临时绕过
+所有地图接口都优先推荐传 `map_name`。例如 `map`
+会解析为机器人现有的 `/opt/fftai/nav/map`。只有需要临时绕过
 统一目录时，才传绝对 `map_path`。
 
 ## 1. Unitree 兼容接口
@@ -66,7 +66,7 @@ Adapter 只是先记录这个目标，真正落盘发生在 `/slam/stop_mapping`
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/start_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429"}'
+  -d '{"map_name":"map"}'
 ```
 
 如果不传 `map_name` 或 `map_path`，停止建图时会使用当前记录的地图路径或
@@ -81,7 +81,7 @@ curl -X POST http://127.0.0.1:8080/slam/start_mapping \
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429"}'
+  -d '{"map_name":"map"}'
 ```
 
 ### POST `/slam/relocation`
@@ -91,7 +91,7 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
+  -d '{"map_name":"map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":false}'
 ```
 
 ### POST `/slam/add_nav_point`
@@ -244,10 +244,10 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
 
 ```json
 {
-  "map_root": "/opt/fftai/nav/maps",
-  "default_map_name": "showroom_1f_20260429",
-  "default_map_path": "/opt/fftai/nav/maps/showroom_1f_20260429",
-  "current_map": "/opt/fftai/nav/maps/showroom_1f_20260429"
+  "map_root": "/opt/fftai/nav",
+  "default_map_name": "map",
+  "default_map_path": "/opt/fftai/nav/map",
+  "current_map": "/opt/fftai/nav/map"
 }
 ```
 
@@ -333,7 +333,7 @@ auto_navigation_motion=nav2_goal
 ```bash
 curl -X POST http://127.0.0.1:8080/robot/map/load \
   -H "Content-Type: application/json" \
-  -d '{"map_name":"showroom_1f_20260429","x":0,"y":0,"yaw":0}'
+  -d '{"map_name":"map","x":0,"y":0,"yaw":0}'
 ```
 
 ### GET `/robot/localization/status`
