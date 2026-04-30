@@ -62,7 +62,16 @@ class RosBridge:
         req.y = float(y)
         req.z = float(z)
         req.yaw = float(yaw)
-        return self._call_service("load_map", req)
+        result = self._call_service("load_map", req, timeout_sec=self.config.map_load_timeout_sec)
+        if "result" in result:
+            try:
+                code = int(result.get("result", -1))
+            except (TypeError, ValueError):
+                code = -1
+            result["success"] = code == 0
+            result["status_code"] = code
+            result.setdefault("message", self._load_map_response_message(code))
+        return result
 
     def save_map(self, map_id: str) -> dict[str, Any]:
         SaveMap = self._require_type("SaveMap")
@@ -339,6 +348,15 @@ class RosBridge:
             3: "map data is empty",
             4: "localization expansion failed",
         }.get(code, f"save_map returned {code}")
+
+    @staticmethod
+    def _load_map_response_message(code: int) -> str:
+        return {
+            0: "map loaded",
+            1: "map not found",
+            2: "map load failed",
+            3: "mode switch failed",
+        }.get(code, f"load_map returned {code}")
 
     @staticmethod
     def _wait_future(future: Any, timeout_sec: float | None) -> Any:

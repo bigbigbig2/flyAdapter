@@ -27,6 +27,9 @@ export MOTION_GUARD=none
 export AURORA_ENABLED=0
 export MAP_ROOT=/opt/fftai/nav
 export DEFAULT_MAP_NAME=map
+export MAP_SAVE_ID_MODE=name
+export MAP_LOAD_TIMEOUT_SEC=10
+export MAP_SAVE_TIMEOUT_SEC=10
 
 chmod +x scripts/run_adapter.sh
 ./scripts/run_adapter.sh

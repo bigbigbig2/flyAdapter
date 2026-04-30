@@ -19,7 +19,8 @@ let currentMapConfig = {
   map_root: "/opt/fftai/nav",
   default_map_name: "map",
   default_map_path: "/opt/fftai/nav/map",
-  save_timeout_sec: 120,
+  load_timeout_sec: 10,
+  save_timeout_sec: 10,
 };
 
 async function api(path, options = {}) {
@@ -198,11 +199,19 @@ function currentMapPayload() {
 }
 
 function mapSaveTimeoutMs() {
-  const seconds = Number(currentMapConfig.save_timeout_sec);
+  return mapOperationTimeoutMs(currentMapConfig.save_timeout_sec);
+}
+
+function mapLoadTimeoutMs() {
+  return mapOperationTimeoutMs(currentMapConfig.load_timeout_sec);
+}
+
+function mapOperationTimeoutMs(value) {
+  const seconds = Number(value);
   if (Number.isFinite(seconds) && seconds > 0) {
-    return Math.max(requestTimeoutMs, (seconds + 15) * 1000);
+    return Math.max(requestTimeoutMs, (seconds + 2) * 1000);
   }
-  return 150000;
+  return requestTimeoutMs;
 }
 
 function joinMapPath(root, name) {
@@ -262,6 +271,7 @@ function renderStatus(status = {}, slamStatus = {}) {
   const aurora = status.aurora || {};
   const motion = motionAuthority(status);
   const ros = status.ros || {};
+  const namespace = status.adapter?.namespace || status.namespace || ros.namespace || "-";
   const mapConfig = status.map_config || slamStatus.map_config || {};
   syncMapControls(mapConfig);
   const mapPath = runtime.current_map || mapConfig.current_map || slamStatus.map_file || "-";
@@ -276,6 +286,7 @@ function renderStatus(status = {}, slamStatus = {}) {
   const poiReady = Boolean(poiReadiness.ready || slamStatus.ready_for_poi);
 
   setAdapter(true, "online");
+  setText("namespaceLabel", namespace);
   setText("rosStatus", ros.ready ? "ready" : "not ready");
   setText("motionStatus", `${motion.policy || "none"} / ${motion.authority || "external"}`);
   setText("slamStatus", slamMode);
@@ -614,7 +625,7 @@ async function loadMap() {
       ...poseBody(),
       wait_for_localization: true,
     },
-    timeoutMs: 35000,
+    timeoutMs: mapLoadTimeoutMs(),
   });
   await refresh(false);
   activeStep("localization");

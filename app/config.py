@@ -36,6 +36,13 @@ def normalize_motion_guard(value: str | None) -> str:
     return "none"
 
 
+def normalize_map_save_id_mode(value: str | None) -> str:
+    value = (value or "name").strip().lower()
+    if value in {"name", "path"}:
+        return value
+    return "name"
+
+
 @dataclass(frozen=True)
 class AppConfig:
     root_dir: Path
@@ -66,7 +73,9 @@ class AppConfig:
     aurora_circuit_failure_threshold: int
     aurora_circuit_open_sec: float
     nav_goal_timeout_sec: float
+    map_load_timeout_sec: float
     map_save_timeout_sec: float
+    map_save_id_mode: str
 
     @property
     def ns(self) -> str:
@@ -127,5 +136,7 @@ def load_config() -> AppConfig:
         aurora_circuit_failure_threshold=int(os.getenv("AURORA_CIRCUIT_FAILURE_THRESHOLD", "3")),
         aurora_circuit_open_sec=float(os.getenv("AURORA_CIRCUIT_OPEN_SEC", "5.0")),
         nav_goal_timeout_sec=float(os.getenv("NAV_GOAL_TIMEOUT_SEC", "300")),
-        map_save_timeout_sec=float(os.getenv("MAP_SAVE_TIMEOUT_SEC", "120")),
+        map_load_timeout_sec=float(os.getenv("MAP_LOAD_TIMEOUT_SEC", "10")),
+        map_save_timeout_sec=float(os.getenv("MAP_SAVE_TIMEOUT_SEC", "10")),
+        map_save_id_mode=normalize_map_save_id_mode(os.getenv("MAP_SAVE_ID_MODE", "name")),
     )

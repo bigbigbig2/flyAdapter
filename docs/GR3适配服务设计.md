@@ -225,11 +225,16 @@ gr3/data
 MAP_ROOT=/opt/fftai/nav
 DEFAULT_MAP_NAME=map
 map_name=map -> /opt/fftai/nav/map
+MAP_SAVE_ID_MODE=name
+MAP_LOAD_TIMEOUT_SEC=10
+MAP_SAVE_TIMEOUT_SEC=10
 ```
 
 API 优先使用 `map_name`，Adapter 统一解析成绝对路径后再传给
-HumanoidNav 的 `SaveMap.map_id` 或 `LoadMap.map_path`。只有需要临时保存到
-统一目录之外时才传绝对 `map_path`。
+HumanoidNav 的 `LoadMap.map_path`。保存时默认把 `map_name` 作为
+`SaveMap.map_id`，避免把 `/opt/fftai/nav/map` 这种既是现有地图目录又是保存目标
+的路径直接交给底层删除重建。只有现场确认必须传绝对路径时，才把
+`MAP_SAVE_ID_MODE` 改为 `path`。
 
 `navigation_points.json` 格式：
 

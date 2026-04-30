@@ -18,6 +18,9 @@ http://机器人IP:8080
 MAP_ROOT=/opt/fftai/nav
 DEFAULT_MAP_NAME=map
 最终路径 = MAP_ROOT / map_name
+MAP_SAVE_ID_MODE=name
+MAP_LOAD_TIMEOUT_SEC=10
+MAP_SAVE_TIMEOUT_SEC=10
 ```
 
 所有地图接口都优先推荐传 `map_name`。例如 `map`
@@ -75,8 +78,11 @@ curl -X POST http://127.0.0.1:8080/slam/start_mapping \
 ### POST `/slam/stop_mapping`
 
 保存地图。兼容原工程误写的 `/aslam/stop_mapping`。底层调用
-`/GR301AA0025/slam/save_map`，请求字段是 `map_id`；绝对路径会直接作为保存目录。
-保存 3D 点云地图可能耗时较长，Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=120` 秒。
+`/GR301AA0025/slam/save_map`，请求字段是 `map_id`。默认 `MAP_SAVE_ID_MODE=name`，
+因此传 `map_name=map` 时底层收到的 `map_id` 是 `map`，而不是
+`/opt/fftai/nav/map`；如果现场确认 HumanoidNav 必须吃绝对路径，可以改成
+`MAP_SAVE_ID_MODE=path`。
+Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=10` 秒；超过 10 秒直接按底层超时处理。
 
 ```bash
 curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
@@ -247,7 +253,8 @@ curl -X POST http://127.0.0.1:8080/audio/talk_text \
   "map_root": "/opt/fftai/nav",
   "default_map_name": "map",
   "default_map_path": "/opt/fftai/nav/map",
-  "current_map": "/opt/fftai/nav/map"
+  "current_map": "/opt/fftai/nav/map",
+  "save_id_mode": "name"
 }
 ```
 
@@ -329,6 +336,8 @@ auto_navigation_motion=nav2_goal
 ### POST `/robot/map/load`
 
 加载地图。推荐传 `map_name`，也兼容绝对 `map_path`。
+底层调用 `/GR301AA0025/slam/load_map`，Adapter 默认等待
+`MAP_LOAD_TIMEOUT_SEC=10` 秒；如果底层返回 `result != 0`，Adapter 会把它归一化为失败响应。
 
 ```bash
 curl -X POST http://127.0.0.1:8080/robot/map/load \

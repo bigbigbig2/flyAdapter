@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from app.bridges.aurora_bridge import AuroraBridge
@@ -156,6 +157,8 @@ class RobotService:
             "default_map_path": self.config.default_map_path,
             "current_map": current_map,
             "current_map_name": self.store.map_name_from_path(current_map),
+            "save_id_mode": self.config.map_save_id_mode,
+            "load_timeout_sec": self.config.map_load_timeout_sec,
             "save_timeout_sec": self.config.map_save_timeout_sec,
         }
 
@@ -355,10 +358,17 @@ class RobotService:
             target = self._resolve_map_target(map_path=map_path, map_name=map_name)
         except (FileNotFoundError, ValueError) as exc:
             return self._map_target_error(exc, "stop_mapping")
-        result = self._safe_ros_call(lambda: self.ros.save_map(target), "stop_mapping")
+        save_map_id = self._resolve_save_map_id(map_path=map_path, map_name=map_name, target=target)
+        save_precheck = self.mapping_readiness()
+        result = self._safe_ros_call(lambda: self.ros.save_map(save_map_id), "stop_mapping")
         result["map_file"] = target
         result["map_name"] = self.store.map_name_from_path(target)
+        result["save_map_id"] = save_map_id
+        result["save_id_mode"] = self.config.map_save_id_mode
         result["timeout_sec"] = self.config.map_save_timeout_sec
+        result["save_precheck"] = save_precheck
+        if result.get("success") is False:
+            result["hints"] = self._save_map_hints(result, save_precheck)
         if result.get("success", True):
             self._record_current_map(target, map_name=map_name)
         return result
@@ -387,7 +397,15 @@ class RobotService:
         except (FileNotFoundError, ValueError) as exc:
             error = self._map_target_error(exc, "relocation")
             return {**self.legacy_status(), "result": error}
+        load_precheck = self._map_load_precheck(path)
         result = self._safe_ros_call(lambda: self.ros.load_map(path, x=x, y=y, z=z, yaw=yaw), "relocation")
+        result["map_file"] = path
+        result["map_name"] = self.store.map_name_from_path(path)
+        result["timeout_sec"] = self.config.map_load_timeout_sec
+        result["load_precheck"] = load_precheck
+        if result.get("success") is False:
+            result["hints"] = self._load_map_hints(result, load_precheck)
+            return {**self.legacy_status(), "result": result}
         if result.get("success", True):
             self._record_current_map(path, map_name=map_name)
         if wait_for_localization:
@@ -415,10 +433,63 @@ class RobotService:
             return self.store.resolve_map_reference(self.config.default_map_path, require_exists=True)
         return self.config.default_map_path
 
+    def _map_load_precheck(self, path: str) -> dict[str, Any]:
+        map_path = Path(path)
+        return {
+            "path": path,
+            "exists": map_path.exists(),
+            "is_dir": map_path.is_dir(),
+            "has_global_pcd": (map_path / "global.pcd").exists(),
+            "has_map_yaml": (map_path / "map.yaml").exists(),
+            "has_map_pgm": (map_path / "map.pgm").exists(),
+            "slam_mode_before": self.state.snapshot()["slam_mode"],
+        }
+
+    def _resolve_save_map_id(self, map_path: str | None, map_name: str | None, target: str) -> str:
+        raw_path = str(map_path or "").strip()
+        raw_name = str(map_name or "").strip()
+        if raw_path:
+            return target
+        if self.config.map_save_id_mode == "path":
+            return target
+        if raw_name:
+            return raw_name
+        return self.store.map_name_from_path(target) or target
+
     def _map_target_error(self, exc: Exception, action_name: str) -> dict[str, Any]:
         status_code = 404 if isinstance(exc, FileNotFoundError) else 400
         self.state.mark_error(str(exc), status_code=status_code)
         return {"success": False, "message": str(exc), "action": action_name, "status_code": status_code}
+
+    def _save_map_hints(self, result: dict[str, Any], readiness: dict[str, Any]) -> list[str]:
+        hints: list[str] = []
+        if "robot_pose_not_fresh" in readiness.get("blockers", []):
+            hints.append("robot_pose is not fresh; confirm /robot_pose is publishing while mapping")
+        message = str(result.get("message", ""))
+        if "timeout" in message:
+            hints.append("HumanoidNav save_map did not return before MAP_SAVE_TIMEOUT_SEC")
+            hints.append("try direct ros2 service call with the reported save_map_id to separate Adapter from HumanoidNav")
+        if self.config.map_save_id_mode == "name":
+            hints.append("SaveMap.map_id was sent as a map name; set MAP_SAVE_ID_MODE=path if HumanoidNav requires an absolute path")
+        else:
+            hints.append("SaveMap.map_id was sent as an absolute path; set MAP_SAVE_ID_MODE=name to send only the map name")
+        return hints
+
+    def _load_map_hints(self, result: dict[str, Any], precheck: dict[str, Any]) -> list[str]:
+        hints: list[str] = []
+        if not precheck.get("exists"):
+            hints.append("map path does not exist on the Adapter host")
+        if not precheck.get("has_global_pcd"):
+            hints.append("map path is missing global.pcd")
+        if not precheck.get("has_map_yaml") or not precheck.get("has_map_pgm"):
+            hints.append("map path is missing map.yaml or map.pgm")
+        message = str(result.get("message", ""))
+        if "timeout" in message:
+            hints.append("HumanoidNav load_map did not return before MAP_LOAD_TIMEOUT_SEC")
+            hints.append("try HumanoidNav scripts/load_map.sh or a direct ros2 service call to separate Adapter from HumanoidNav")
+        if precheck.get("slam_mode_before") == "mapping":
+            hints.append("load_map was called while slam_mode was still mapping; confirm HumanoidNav can switch to localization")
+        return hints
 
     def _record_current_map(self, path: str, map_name: str | None = None) -> None:
         self.state.current_map = path

@@ -156,6 +156,9 @@ source .venv/bin/activate
 export ROBOT_NAMESPACE=GR301AA0025
 export MAP_ROOT=/opt/fftai/nav
 export DEFAULT_MAP_NAME=map
+export MAP_SAVE_ID_MODE=name
+export MAP_LOAD_TIMEOUT_SEC=10
+export MAP_SAVE_TIMEOUT_SEC=10
 export MOTION_GUARD=none
 export AURORA_ENABLED=0
 
@@ -319,7 +322,10 @@ curl -X POST http://127.0.0.1:8080/slam/stop_mapping \
   -d '{"map_name":"map"}'
 ```
 
-保存 3D 点云地图可能需要几十秒；Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=120` 秒。
+Adapter 默认等待 `MAP_SAVE_TIMEOUT_SEC=10` 秒；超过 10 秒直接按底层超时处理。
+默认 `MAP_SAVE_ID_MODE=name` 时，Adapter 会把 `map_name=map` 作为底层
+`SaveMap.map_id` 发给 HumanoidNav，同时把加载路径记录为 `/opt/fftai/nav/map`。
+如果现场直接调用 ROS2 证明底层只接受绝对路径，再改为 `MAP_SAVE_ID_MODE=path`。
 如果仍然超时，优先在 HumanoidNav 终端看 `/slam/save_map` 是否仍在写盘、地图数据是否为空、目标磁盘是否可写。
 
 检查地图：
@@ -348,6 +354,10 @@ curl -X POST http://127.0.0.1:8080/slam/relocation \
   -H "Content-Type: application/json" \
   -d '{"map_name":"map","x":0,"y":0,"z":0,"yaw":0,"wait_for_localization":true}'
 ```
+
+Adapter 默认等待 `MAP_LOAD_TIMEOUT_SEC=10` 秒。如果返回 timeout，优先直接跑
+HumanoidNav 自带 `scripts/load_map.sh` 或直接 `ros2 service call`，确认底层
+`/slam/load_map` 是否能自己完成。
 
 打开定位 RViz：
 
