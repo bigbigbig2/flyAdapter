@@ -3,9 +3,24 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const jsonHeaders = { "Content-Type": "application/json" };
 const requestTimeoutMs = 12000;
+const localizationWaitFloorMs = 45000;
 const rvizCommands = {
-  mapping: "cd ~/aurora_ws/flyAdapter || exit 1\nsource /opt/ros/humble/setup.bash\nsource /opt/fftai/humanoidnav/install/setup.bash\nrviz2 -d rviz/mapping_GR301AA0025.rviz \\\n  --ros-args \\\n  -r tf:=/GR301AA0025/tf \\\n  -r tf_static:=/GR301AA0025/tf_static",
-  localization: "cd ~/aurora_ws/flyAdapter || exit 1\nsource /opt/ros/humble/setup.bash\nsource /opt/fftai/humanoidnav/install/setup.bash\nrviz2 -d rviz/relocation_GR301AA0025.rviz \\\n  --ros-args \\\n  -r tf:=/GR301AA0025/tf \\\n  -r tf_static:=/GR301AA0025/tf_static",
+  mapping:
+    "cd ~/aurora_ws/flyAdapter || exit 1\n" +
+    "source /opt/ros/humble/setup.bash\n" +
+    "source /opt/fftai/humanoidnav/install/setup.bash\n" +
+    "rviz2 -d rviz/mapping_GR301AA0025.rviz \\\n" +
+    "  --ros-args \\\n" +
+    "  -r tf:=/GR301AA0025/tf \\\n" +
+    "  -r tf_static:=/GR301AA0025/tf_static",
+  localization:
+    "cd ~/aurora_ws/flyAdapter || exit 1\n" +
+    "source /opt/ros/humble/setup.bash\n" +
+    "source /opt/fftai/humanoidnav/install/setup.bash\n" +
+    "rviz2 -d rviz/relocation_GR301AA0025.rviz \\\n" +
+    "  --ros-args \\\n" +
+    "  -r tf:=/GR301AA0025/tf \\\n" +
+    "  -r tf_static:=/GR301AA0025/tf_static",
 };
 
 let refreshing = false;
@@ -14,18 +29,23 @@ let selectedPoi = "";
 let lastStatus = {};
 let lastSlamStatus = {};
 let lastPoints = [];
-let lastPointIssues = { duplicateNames: [], duplicateCount: 0 };
+let lastPointIssues = { duplicateNames: [], duplicateCount: 0, counts: new Map() };
 let currentPointBundle = {
   map_file: "",
   map_name: "",
+  current_map: "",
+  current_map_name: "",
+  bundle_matches_current: false,
   initial_pose: {},
   visualization_topics: {},
   unitree_style: true,
 };
 let currentMapConfig = {
-  map_root: "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps",
+  map_root: "/opt/fftai/nav",
   default_map_name: "map",
-  default_map_path: "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps/map",
+  default_map_path: "/opt/fftai/nav/map",
+  current_map: "",
+  current_map_name: "",
   load_timeout_sec: 10,
   save_timeout_sec: 10,
 };
@@ -59,7 +79,7 @@ async function api(path, options = {}) {
     }
     return data;
   } catch (error) {
-    const message = error.name === "AbortError" ? "请求超时" : String(error);
+    const message = error.name === "AbortError" ? "请求超时" : String(error.message || error);
     const data = { success: false, message, path, method };
     if (options.updateLast !== false) {
       setJson("lastResponse", data);
@@ -84,20 +104,6 @@ function parseResponse(text) {
   }
 }
 
-function setText(id, value) {
-  const target = $(id);
-  if (target) {
-    target.textContent = value == null || value === "" ? "-" : String(value);
-  }
-}
-
-function setJson(id, data) {
-  const target = $(id);
-  if (target) {
-    target.textContent = JSON.stringify(data, null, 2);
-  }
-}
-
 function resultOk(data) {
   if (!data || data.http_status >= 400) {
     return false;
@@ -111,24 +117,29 @@ function resultOk(data) {
   return true;
 }
 
-function logOperation(title, data) {
-  const log = $("operationLog");
-  if (!log) {
-    return;
-  }
-  const now = new Date().toLocaleTimeString();
-  const mark = resultOk(data) ? "OK" : "CHECK";
-  const detail = responseMessage(data);
-  log.textContent += `[${now}] ${mark} ${title}${detail ? ` - ${detail}` : ""}\n`;
-  const lines = log.textContent.split("\n");
-  if (lines.length > 240) {
-    log.textContent = lines.slice(-220).join("\n");
-  }
-  log.scrollTop = log.scrollHeight;
-}
-
 function responseMessage(data) {
   return data?.result?.message || data?.message || data?.error || data?.status || "";
+}
+
+function setText(id, value) {
+  const el = $(id);
+  if (el) {
+    el.textContent = value == null || value === "" ? "-" : String(value);
+  }
+}
+
+function setJson(id, data) {
+  const el = $(id);
+  if (el) {
+    el.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
+function setHtml(id, html) {
+  const el = $(id);
+  if (el) {
+    el.innerHTML = html;
+  }
 }
 
 function boolText(value) {
@@ -158,6 +169,22 @@ function blockerText(readiness) {
   return readiness?.ready ? "ready" : "-";
 }
 
+function logOperation(title, data) {
+  const log = $("operationLog");
+  if (!log) {
+    return;
+  }
+  const now = new Date().toLocaleTimeString();
+  const mark = resultOk(data) ? "OK" : "CHECK";
+  const detail = responseMessage(data);
+  log.textContent += `[${now}] ${mark} ${title}${detail ? ` - ${detail}` : ""}\n`;
+  const lines = log.textContent.split("\n");
+  if (lines.length > 240) {
+    log.textContent = lines.slice(-220).join("\n");
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
 function setAdapter(ok, text) {
   const dot = $("adapterDot");
   if (dot) {
@@ -176,8 +203,27 @@ function setBadge(id, state, text) {
   el.textContent = text;
 }
 
-function setStepState(id, text) {
-  setText(id, text);
+function setNotice(id, state, text) {
+  const el = $(id);
+  if (!el) {
+    return;
+  }
+  if (!text) {
+    el.className = "notice hidden";
+    el.textContent = "";
+    return;
+  }
+  el.className = `notice ${state || ""}`.trim();
+  el.textContent = text;
+}
+
+function setActionHint(id, state, text) {
+  const el = $(id);
+  if (!el) {
+    return;
+  }
+  el.className = `action-hint ${state || ""}`.trim();
+  el.textContent = text || "-";
 }
 
 function activeStep(step) {
@@ -185,7 +231,7 @@ function activeStep(step) {
   $$(".step-panel").forEach((item) => item.classList.toggle("active", item.dataset.panel === step));
 }
 
-function mapNameValue() {
+function configuredMapName() {
   return $("mapName")?.value.trim() || currentMapConfig.default_map_name || "map";
 }
 
@@ -193,28 +239,26 @@ function explicitMapPath() {
   return $("mapPath")?.value.trim() || "";
 }
 
-function currentMapPath() {
-  return explicitMapPath() || joinMapPath(currentMapConfig.map_root, mapNameValue());
+function joinMapPath(root, name) {
+  const cleanRoot = String(root || "/opt/fftai/nav").replace(/[\\/]+$/, "");
+  const cleanName = String(name || "map").replace(/^[\\/]+|[\\/]+$/g, "");
+  return `${cleanRoot}/${cleanName}`;
+}
+
+function configuredMapPath() {
+  return explicitMapPath() || joinMapPath(currentMapConfig.map_root, configuredMapName());
 }
 
 function currentMapPayload() {
   const payload = {};
   const path = explicitMapPath();
-  const name = mapNameValue();
+  const name = configuredMapName();
   if (path) {
     payload.map_path = path;
   } else if (name) {
     payload.map_name = name;
   }
   return payload;
-}
-
-function mapSaveTimeoutMs() {
-  return mapOperationTimeoutMs(currentMapConfig.save_timeout_sec);
-}
-
-function mapLoadTimeoutMs() {
-  return mapOperationTimeoutMs(currentMapConfig.load_timeout_sec);
 }
 
 function mapOperationTimeoutMs(value) {
@@ -225,21 +269,27 @@ function mapOperationTimeoutMs(value) {
   return requestTimeoutMs;
 }
 
-function joinMapPath(root, name) {
-  const cleanRoot = String(root || "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps").replace(/[\\/]+$/, "");
-  const cleanName = String(name || "map").replace(/^[\\/]+|[\\/]+$/g, "");
-  return `${cleanRoot}/${cleanName}`;
+function mapSaveTimeoutMs() {
+  return mapOperationTimeoutMs(currentMapConfig.save_timeout_sec);
+}
+
+function mapLoadTimeoutMs() {
+  return mapOperationTimeoutMs(currentMapConfig.load_timeout_sec);
+}
+
+function localizationWaitTimeoutMs() {
+  return Math.max(localizationWaitFloorMs, mapLoadTimeoutMs());
 }
 
 function syncMapControls(mapConfig = {}) {
   currentMapConfig = { ...currentMapConfig, ...mapConfig };
-  const nameInput = $("mapName");
-  const pathInput = $("mapPath");
-  if (nameInput && !nameInput.value.trim() && document.activeElement !== nameInput) {
-    nameInput.value = currentMapConfig.default_map_name || currentMapConfig.current_map_name || "";
+  const mapNameInput = $("mapName");
+  const mapPathInput = $("mapPath");
+  if (mapNameInput && !mapNameInput.value.trim() && document.activeElement !== mapNameInput) {
+    mapNameInput.value = currentMapConfig.current_map_name || currentMapConfig.default_map_name || "map";
   }
-  if (pathInput && document.activeElement !== pathInput) {
-    pathInput.placeholder = `自动：${joinMapPath(currentMapConfig.map_root, mapNameValue())}`;
+  if (mapPathInput && document.activeElement !== mapPathInput) {
+    mapPathInput.placeholder = `留空则使用 ${joinMapPath(currentMapConfig.map_root, configuredMapName())}`;
   }
 }
 
@@ -252,17 +302,82 @@ function poseBody() {
   };
 }
 
+function bundlePoseBody() {
+  const pose = currentPointBundle.initial_pose || {};
+  const hasPose = ["x", "y", "z", "yaw"].some((key) => pose[key] !== undefined && pose[key] !== null && pose[key] !== "");
+  if (!hasPose) {
+    return poseBody();
+  }
+  return {
+    x: numberOrZero(pose.x),
+    y: numberOrZero(pose.y),
+    z: numberOrZero(pose.z),
+    yaw: numberOrZero(pose.yaw),
+  };
+}
+
 function numberOrZero(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function motionAuthority(status) {
-  return status?.motion_authority || status?.workflow?.motion_authority || {};
+function basenameFromPath(path) {
+  const value = String(path || "").trim().replace(/[\\/]+$/, "");
+  if (!value) {
+    return "";
+  }
+  const parts = value.split(/[\\/]/);
+  return parts[parts.length - 1] || "";
 }
 
-function auroraVelocitySource(aurora) {
-  return aurora?.raw?.value?.velocity_source_name || aurora?.velocity_source_name || "-";
+function loadedMapPath() {
+  return (
+    lastStatus.runtime?.current_map ||
+    currentMapConfig.current_map ||
+    lastSlamStatus.map_file ||
+    ""
+  );
+}
+
+function loadedMapName() {
+  return (
+    currentMapConfig.current_map_name ||
+    lastStatus.runtime?.current_map_name ||
+    basenameFromPath(loadedMapPath())
+  );
+}
+
+function bundleMapPath() {
+  return currentPointBundle.map_file || "";
+}
+
+function bundleMapName() {
+  return currentPointBundle.map_name || basenameFromPath(bundleMapPath());
+}
+
+function bundleMatchesCurrent() {
+  const bundle = bundleMapPath();
+  const current = loadedMapPath();
+  if (!bundle || !current) {
+    return false;
+  }
+  return bundle === current;
+}
+
+function pointReadiness() {
+  return lastStatus.poi_readiness || lastSlamStatus.poi_readiness || {};
+}
+
+function mappingReadiness() {
+  return lastStatus.mapping_readiness || lastSlamStatus.mapping_readiness || {};
+}
+
+function navigationReadiness() {
+  return lastStatus.navigation_readiness || lastStatus.readiness || {};
+}
+
+function motionAuthority() {
+  return lastStatus.motion_authority || lastStatus.workflow?.motion_authority || {};
 }
 
 function formatAge(value) {
@@ -273,84 +388,139 @@ function formatAge(value) {
   return `${parsed.toFixed(1)}s`;
 }
 
+function nextActionText() {
+  const slamMode = lastStatus.runtime?.slam_mode || lastSlamStatus.slam_mode || "-";
+  const mapReady = Boolean(mappingReadiness().ready || lastSlamStatus.ready_for_mapping);
+  const poiReady = Boolean(pointReadiness().ready || lastSlamStatus.ready_for_poi);
+  const navReady = Boolean(navigationReadiness().ready);
+  const hasPoints = lastPoints.length > 0;
+  const current = loadedMapPath();
+  const bundle = bundleMapPath();
+
+  if (slamMode === "mapping") {
+    return mapReady ? "可以继续手动建图，结束时用“停止建图并保存”落盘地图。" : "先确认 ROS、位姿和手动控制链路，再开始建图。";
+  }
+  if (!current) {
+    return "先加载地图。只想切到定位模式时用“仅加载地图”，要等定位稳定再打点或导航时用“加载并等待定位稳定”。";
+  }
+  if (bundle && current !== bundle) {
+    return "当前加载地图和点位文件绑定地图不一致。先用“按点位文件加载地图并定位”再导航。";
+  }
+  if (!poiReady) {
+    return "地图已加载，但定位还没稳。等定位 readiness 变好后再打点。";
+  }
+  if (!hasPoints) {
+    return "定位已经可用，可以先保存 POI。";
+  }
+  if (!navReady) {
+    return "点位文件已就绪，但自动导航还没 ready。先看 readiness 阻塞项。";
+  }
+  return "当前可以做单点导航或开始巡航。";
+}
+
+function selectedPoiRecord() {
+  return lastPoints.find((point) => point.name === selectedPoi) || null;
+}
+
+function renderFlowCards() {
+  const current = loadedMapPath();
+  const bundle = bundleMapPath();
+  const mapReady = Boolean(mappingReadiness().ready || lastSlamStatus.ready_for_mapping);
+  const poiReady = Boolean(pointReadiness().ready || lastSlamStatus.ready_for_poi);
+  const navReady = Boolean(navigationReadiness().ready);
+  const hasPoints = lastPoints.length > 0;
+
+  setText("flowMappingStatus", mapReady ? "可以开始建图" : blockerText(mappingReadiness()));
+  setText("flowLocalizationStatus", current ? (poiReady ? "已加载，可继续打点" : "地图已加载，等待定位稳定") : "还没加载地图");
+  setText(
+    "flowNavigationStatus",
+    !hasPoints
+      ? "还没有点位文件"
+      : !bundleMatchesCurrent()
+        ? "点位文件和当前地图不一致"
+        : navReady
+          ? "可以导航"
+          : blockerText(navigationReadiness())
+  );
+  setText("nextAction", nextActionText());
+}
+
 function renderStatus(status = {}, slamStatus = {}) {
   const runtime = status.runtime || {};
-  const workflow = status.workflow || {};
-  const mappingReadiness = status.mapping_readiness || workflow.manual_mapping || slamStatus.mapping_readiness || {};
-  const poiReadiness = status.poi_readiness || workflow.manual_poi || slamStatus.poi_readiness || {};
-  const navigationReadiness = status.navigation_readiness || status.readiness || workflow.auto_navigation || {};
-  const aurora = status.aurora || {};
-  const motion = motionAuthority(status);
+  const mapping = mappingReadiness();
+  const poi = pointReadiness();
+  const navigation = navigationReadiness();
   const ros = status.ros || {};
+  const aurora = status.aurora || {};
+  const motion = motionAuthority();
   const namespace = status.adapter?.namespace || status.namespace || ros.namespace || "-";
   const mapConfig = status.map_config || slamStatus.map_config || {};
-  syncMapControls(mapConfig);
-  const mapPath = runtime.current_map || mapConfig.current_map || slamStatus.map_file || "-";
   const slamMode = runtime.slam_mode || slamStatus.slam_mode || "-";
-  const navTask = runtime.navigation_task || {};
+  const currentMap = runtime.current_map || mapConfig.current_map || slamStatus.map_file || "-";
+  const currentMapName = mapConfig.current_map_name || basenameFromPath(currentMap) || "-";
   const isCruising = Boolean(runtime.is_cruising || slamStatus.is_cruising);
   const isPaused = Boolean(runtime.is_paused || slamStatus.is_paused);
   const poseAge = runtime.pose_age_sec ?? slamStatus.pose_age_sec;
-  const auroraRequired = Boolean(motion.aurora_required || navigationReadiness.checks?.aurora_required);
-  const navReady = Boolean(navigationReadiness.ready);
-  const mapReady = Boolean(mappingReadiness.ready || slamStatus.ready_for_mapping);
-  const poiReady = Boolean(poiReadiness.ready || slamStatus.ready_for_poi);
+  const navTask = runtime.navigation_task || {};
+  const mapReady = Boolean(mapping.ready || slamStatus.ready_for_mapping);
+  const poiReady = Boolean(poi.ready || slamStatus.ready_for_poi);
+  const navReady = Boolean(navigation.ready);
+  const lastError = slamStatus.last_error || status.last_error || status.error || "";
 
+  syncMapControls(mapConfig);
   setAdapter(true, "online");
   setText("namespaceLabel", namespace);
   setText("rosStatus", ros.ready ? "ready" : "not ready");
   setText("motionStatus", `${motion.policy || "none"} / ${motion.authority || "external"}`);
   setText("slamStatus", slamMode);
   setText("navigationReady", boolText(navReady));
-  setText("currentMap", mapPath);
+  setText("currentMap", currentMap);
+  setText("currentMapName", currentMapName);
   setText("poseAge", formatAge(poseAge));
   setText("navTask", isCruising ? (isPaused ? "paused" : "cruising") : (navTask.status || "idle"));
 
   setText("checkAdapter", "online");
   setText("checkRos", ros.ready ? "ready" : (ros.error || "not ready"));
-  setText("checkMapping", readyWord(mappingReadiness));
-  setText("checkPoi", readyWord(poiReadiness));
-  setText("checkNavigation", readyWord(navigationReadiness));
-  setText(
-    "checkAurora",
-    aurora.connected
-      ? (aurora.standing ? `standing / ${auroraVelocitySource(aurora)}` : "connected")
-      : (auroraRequired ? "required" : `optional / ${motion.policy || "none"}`)
-  );
-  setText("checkBody", motion.authority || (aurora.standing ? "standing" : "external"));
-  setText("healthLine", `${ros.ready ? "ROS ready" : "ROS not ready"} / ${motion.policy || "none"} / ${currentMapPath()}`);
+  setText("checkMapping", readyWord(mapping));
+  setText("checkPoi", readyWord(poi));
+  setText("checkNavigation", readyWord(navigation));
+  setText("checkAurora", aurora.connected ? (aurora.standing ? "standing" : "connected") : (aurora.error || "optional"));
+  setText("checkBody", motion.authority || "external");
+  setText("healthLine", lastError ? `最近错误: ${lastError}` : nextActionText());
+  setText("opsCurrentMap", currentMap === "-" ? "未加载" : currentMap);
+  setText("opsBundleMap", bundleMapPath() || "未绑定点位文件");
+  setText("opsPoseState", poiReady ? "定位稳定，可打点" : blockerText(poi));
+  setText("opsActionState", nextActionText());
 
-  setText("mappingModeCheck", mappingReadiness.checks?.mapping_mode ? "mapping" : slamMode);
-  setText("mappingPoseCheck", statusWord(mappingReadiness.checks?.pose_fresh));
-  setText("mappingHealthCheck", statusWord(mappingReadiness.checks?.health_ok));
-  setText("mappingControlSource", mappingReadiness.checks?.motion_source || "remote_or_joystick");
+  setText("mappingModeCheck", mapping.checks?.mapping_mode ? "mapping" : slamMode);
+  setText("mappingPoseCheck", statusWord(mapping.checks?.pose_fresh));
+  setText("mappingHealthCheck", statusWord(mapping.checks?.health_ok));
+  setText("mappingControlSource", mapping.checks?.motion_source || "remote_or_joystick");
 
   setJson("readinessBox", {
-    motion_authority: motion,
     map_config: currentMapConfig,
-    manual_mapping: mappingReadiness,
-    manual_poi: poiReadiness,
-    auto_navigation: navigationReadiness,
+    motion_authority: motion,
+    mapping_readiness: mapping,
+    poi_readiness: poi,
+    navigation_readiness: navigation,
     aurora,
+    ros,
   });
   setJson("mappingBox", {
-    target_map: currentMapPath(),
-    map_name: mapNameValue(),
-    ready_for_mapping: mapReady,
+    target_map: configuredMapPath(),
+    current_map: currentMap,
     slam_mode: slamMode,
-    pose_age_sec: poseAge,
-    localization_status: slamStatus.localization_status,
-    mapping_readiness: mappingReadiness,
+    mapping_readiness: mapping,
   });
   setJson("localizationBox", {
-    target_map: currentMapPath(),
-    current_map: mapPath,
-    slam_mode: slamMode,
+    target_map: configuredMapPath(),
+    current_map: currentMap,
+    current_map_name: currentMapName,
+    localization_status: slamStatus.localization_status,
     odom_status_code: runtime.odom_status_code ?? slamStatus.odom_status_code,
     odom_status_score: runtime.odom_status_score ?? slamStatus.odom_status_score,
-    localization_status: slamStatus.localization_status,
-    poi_readiness: poiReadiness,
-    navigation_readiness: navigationReadiness,
+    poi_readiness: poi,
+    navigation_readiness: navigation,
   });
   setJson("cruiseBox", {
     is_cruising: isCruising,
@@ -361,19 +531,41 @@ function renderStatus(status = {}, slamStatus = {}) {
     task: navTask,
   });
 
-  setBadge("mappingHint", mapReady ? "ok" : "warn", mapReady ? "建图就绪" : blockerText(mappingReadiness));
-  setBadge("saveHint", mapPath !== "-" ? "ok" : "warn", mapPath !== "-" ? "路径已记录" : "待保存");
-  setBadge("localizationHint", navReady ? "ok" : "warn", navReady ? "导航就绪" : blockerText(navigationReadiness));
-  setBadge("cruiseHint", isCruising ? "ok" : "warn", isCruising ? (isPaused ? "已暂停" : "巡航中") : "未巡航");
+  setBadge("mappingHint", mapReady ? "ok" : "warn", mapReady ? "建图链路可用" : blockerText(mapping));
+  setBadge("localizationHint", poiReady ? "ok" : "warn", poiReady ? "定位稳定，可打点" : blockerText(poi));
+  setBadge("pointsHint", lastPoints.length ? (lastPointIssues.duplicateNames.length ? "warn" : "ok") : "warn", `${lastPoints.length} 个点位`);
+  setBadge("verifyHint", navReady ? "ok" : "warn", navReady ? "可以导航" : blockerText(navigation));
+  setBadge("cruiseHint", isCruising ? "ok" : "warn", isCruising ? (isPaused ? "巡航暂停" : "巡航运行中") : "未开始");
 
-  setStepState("stepCheckState", ros.ready ? "通过" : "待处理");
-  setStepState("stepMappingState", mapReady ? "可建图" : "待确认");
-  setStepState("stepSaveState", mapPath !== "-" ? "路径已记录" : "待保存");
-  setStepState("stepLocalizationState", navReady ? "可导航" : (poiReady ? "可打点" : "待定位"));
-  setStepState("stepCruiseState", isCruising ? (isPaused ? "已暂停" : "运行中") : "待启动");
-  setText("saveNote", `目标：${currentMapPath()}`);
-  setText("cruiseSummary", isCruising ? `第 ${(runtime.current_nav_index ?? 0) + 1} / ${runtime.total_nav_points || 0} 点` : "未启动");
+  setText("stepCheckState", ros.ready ? "通过" : "待处理");
+  setText("stepMappingState", mapReady ? "可建图" : blockerText(mapping));
+  setText("stepLocalizationState", poiReady ? "可打点" : blockerText(poi));
+  setText("stepPointsState", `${lastPoints.length} 个点位`);
+  setText("stepVerifyState", selectedPoi || "待选择");
+  setText("stepCruiseState", isCruising ? (isPaused ? "已暂停" : "运行中") : "待启动");
+  setText("stepAcceptanceState", navReady ? "可验收" : "待准备");
 
+  setText("saveNote", `目标地图: ${configuredMapPath()}`);
+  setText("cruiseSummary", isCruising ? `当前索引 ${(runtime.current_nav_index ?? 0) + 1} / ${runtime.total_nav_points || 0}` : "未启动");
+  setText("localizationSummary", currentMap === "-" ? "当前未加载地图" : `当前地图: ${currentMapName}`);
+
+  setNotice(
+    "localizationNotice",
+    poiReady ? "ok" : "warn",
+    poiReady
+      ? "定位已经稳定，可以安全打点。"
+      : "打点前先让定位 readiness 变好。否则点可能记在错误位姿上，后面导航就会出现超出地图范围。"
+  );
+
+  setActionHint(
+    "localizationActionHint",
+    poiReady ? "ok" : "warn",
+    poiReady
+      ? "地图已加载且定位稳定。现在适合打点，或者直接做单点验证。"
+      : "如果只是切到 localization 看图，用“仅加载地图”；如果后面要打点或导航，优先用“加载并等待定位稳定”。"
+  );
+
+  renderFlowCards();
   updateControls();
 }
 
@@ -405,7 +597,7 @@ async function refresh(updateLast = false) {
         slamResult.status === "rejected" ? `/slam/status: ${slamResult.reason?.message || slamResult.reason}` : "",
       ].filter(Boolean);
       setAdapter(true, "partial");
-      setText("healthLine", `部分状态接口异常：${failed.join("; ")}`);
+      setText("healthLine", `部分状态接口异常: ${failed.join("; ")}`);
     }
   } catch (error) {
     setAdapter(false, "offline");
@@ -418,6 +610,7 @@ async function refresh(updateLast = false) {
     await loadPoints(false);
   } catch {
     renderPoints(lastPoints);
+    renderPointBundle();
   }
 }
 
@@ -427,6 +620,9 @@ async function loadPoints(updateLast = true) {
   currentPointBundle = {
     map_file: data.map_file || "",
     map_name: data.map_name || "",
+    current_map: data.current_map || "",
+    current_map_name: data.current_map_name || "",
+    bundle_matches_current: Boolean(data.bundle_matches_current),
     initial_pose: data.initial_pose || {},
     visualization_topics: data.visualization_topics || {},
     unitree_style: data.unitree_style !== false,
@@ -435,6 +631,7 @@ async function loadPoints(updateLast = true) {
   renderPoints(lastPoints);
   updatePointSummary();
   renderPointBundle();
+  updateControls();
   return data;
 }
 
@@ -484,45 +681,58 @@ function analyzePoints(points) {
 function updatePointSummary() {
   const count = lastPoints.length;
   const duplicateNames = lastPointIssues.duplicateNames;
-  const duplicateText = duplicateNames.length ? `，重复 ${duplicateNames.length} 组` : "";
-  setText("pointsSummary", `共 ${count} 点${duplicateText}`);
-  setStepState("stepPointsState", `${count} 点`);
-  setBadge("pointsHint", count > 0 ? (duplicateNames.length ? "warn" : "ok") : "warn", `${count} 点`);
-  const notice = $("duplicateNotice");
-  if (notice) {
-    if (duplicateNames.length) {
-      notice.classList.remove("hidden");
-      notice.textContent = `检测到同名点：${duplicateNames.join(", ")}。按名称导航会使用第一个匹配点，建议覆盖保存或删除后重打。`;
-    } else {
-      notice.classList.add("hidden");
-      notice.textContent = "";
-    }
-  }
-  setStepState("stepVerifyState", selectedPoi || "待选择");
-  updateControls();
+  setText("pointsSummary", duplicateNames.length ? `${count} 个点位，存在重名` : `${count} 个点位`);
+  setText("stepPointsState", `${count} 个点位`);
+  setBadge("pointsHint", count ? (duplicateNames.length ? "warn" : "ok") : "warn", `${count} 个点位`);
+  setNotice(
+    "duplicateNotice",
+    "warn",
+    duplicateNames.length
+      ? `检测到同名点位: ${duplicateNames.join(", ")}。按名称导航时只会命中第一个匹配点，建议覆盖保存或删掉重名点。`
+      : ""
+  );
 }
 
 function renderPointBundle() {
   const topics = currentPointBundle.visualization_topics || {};
-  const currentMap = currentMapPath();
-  const bundleMap = currentPointBundle.map_file || "-";
-  const style = currentPointBundle.unitree_style ? "Unitree navigation_points.json" : "custom";
-  setText("pointBundleStyle", style);
-  setText("pointBundleMap", bundleMap);
-  setText("pointBundleName", currentPointBundle.map_name || "-");
-  setText("pointBundleTopics", [topics.nav_points, topics.current_goal, topics.cruise_path].filter(Boolean).join(" / ") || "-");
+  const current = loadedMapPath() || currentPointBundle.current_map || "";
+  const currentName = loadedMapName() || currentPointBundle.current_map_name || "-";
+  const bundle = bundleMapPath() || "-";
+  const bundleNameValue = bundleMapName() || "-";
+  const match = bundleMatchesCurrent();
+  const initial = bundlePoseBody();
+  const rawInitial = currentPointBundle.initial_pose || {};
+  const hasInitial = ["x", "y", "z", "yaw"].some((key) => rawInitial[key] !== undefined && rawInitial[key] !== null && rawInitial[key] !== "");
+  const topicText = [topics.nav_points, topics.current_goal, topics.cruise_path].filter(Boolean).join(" / ") || "-";
 
-  const notice = $("bundleNotice");
-  if (!notice) {
-    return;
-  }
-  if (bundleMap !== "-" && currentMap !== "-" && bundleMap !== currentMap) {
-    notice.classList.remove("hidden");
-    notice.textContent = `点位文件绑定地图 ${bundleMap}，顶部当前目标地图是 ${currentMap}。请先确认地图和点位属于同一张图。`;
-  } else {
-    notice.classList.add("hidden");
-    notice.textContent = "";
-  }
+  setText("pointBundleStyle", currentPointBundle.unitree_style ? "Unitree navigation_points.json" : "custom");
+  setText("pointBundleMap", bundle);
+  setText("pointBundleName", bundleNameValue);
+  setText("pointBundleCurrentMap", current || "-");
+  setText("pointBundleCurrentName", currentName);
+  setText("pointBundleInitialPose", hasInitial ? `x=${num(initial.x)}, y=${num(initial.y)}, yaw=${num(initial.yaw)}` : "未保存，使用定位输入框");
+  setText("pointBundleTopics", topicText);
+  setBadge("bundleMatchBadge", match ? "ok" : "warn", match ? "地图一致" : "地图不一致");
+
+  setNotice(
+    "bundleNotice",
+    match ? "ok" : "warn",
+    bundle === "-"
+      ? "当前没有读取到点位文件。先加载或保存点位文件。"
+      : match
+        ? "点位文件和当前加载地图一致，可以继续单点导航或巡航。"
+        : `点位文件绑定地图是 ${bundle}，当前底层加载的是 ${current || "未加载"}。导航前先点“按点位文件加载地图并定位”。`
+  );
+
+  setNotice(
+    "navigationNotice",
+    (!lastPoints.length || match) ? "ok" : "warn",
+    !lastPoints.length
+      ? "还没有点位，先去打点。"
+      : match
+        ? "当前地图和点位文件一致，可以做单点验证。"
+        : "当前地图与点位文件不一致，页面会优先阻止直接导航。"
+  );
 }
 
 function renderPoints(points) {
@@ -544,6 +754,7 @@ function renderPoints(points) {
     selectedPoi = "";
     setBadge("verifyHint", "warn", "待选择");
     setText("verifySummary", "未选择目标");
+    renderSelectedPoiMeta();
     return;
   }
 
@@ -554,10 +765,11 @@ function renderPoints(points) {
   for (const point of filtered) {
     const duplicate = (counts.get(point.name) || 0) > 1;
     const item = document.createElement("div");
-    item.className = `point ${duplicate ? "duplicate" : ""}`.trim();
+    item.className = `point ${duplicate ? "duplicate" : ""} ${selectedPoi === point.name ? "selected" : ""}`.trim();
+    item.onclick = () => selectPoi(point.name);
 
     const title = document.createElement("strong");
-    title.textContent = duplicate ? `${point.name}（重复）` : point.name;
+    title.textContent = duplicate ? `${point.name}（重名）` : point.name;
 
     const coords = document.createElement("span");
     const mapText = point.map_name ? ` / map=${point.map_name}` : "";
@@ -577,7 +789,8 @@ function renderPoints(points) {
 
   const uniqueNames = Array.from(new Set(points.map((point) => point.name)));
   for (const name of uniqueNames) {
-    const label = (counts.get(name) || 0) > 1 ? `${name}（重复 ${counts.get(name)}）` : name;
+    const count = counts.get(name) || 0;
+    const label = count > 1 ? `${name}（重名 ${count}）` : name;
     select.appendChild(new Option(label, name));
   }
 
@@ -585,8 +798,10 @@ function renderPoints(points) {
     selectedPoi = uniqueNames[0] || "";
   }
   select.value = selectedPoi;
-  setBadge("verifyHint", selectedPoi ? ((counts.get(selectedPoi) || 0) > 1 ? "warn" : "ok") : "warn", selectedPoi || "待选择");
-  setText("verifySummary", selectedPoi ? `目标：${selectedPoi}` : "未选择目标");
+  const selectedDuplicate = (counts.get(selectedPoi) || 0) > 1;
+  setBadge("verifyHint", selectedPoi ? (selectedDuplicate ? "warn" : "ok") : "warn", selectedPoi || "待选择");
+  setText("verifySummary", selectedPoi ? `目标: ${selectedPoi}` : "未选择目标");
+  renderSelectedPoiMeta();
 }
 
 function emptyPoint(text) {
@@ -623,9 +838,25 @@ function selectPoi(name) {
   }
   const duplicate = (lastPointIssues.counts?.get(name) || 0) > 1;
   setBadge("verifyHint", duplicate ? "warn" : "ok", name);
-  setText("verifySummary", `目标：${name}`);
+  setText("verifySummary", `目标: ${name}`);
+  setText("stepVerifyState", name);
+  renderSelectedPoiMeta();
+  renderPoints(lastPoints);
   activeStep("verify");
   updateControls();
+}
+
+function renderSelectedPoiMeta() {
+  const point = selectedPoiRecord();
+  if (!point) {
+    setText("selectedPoiMeta", "未选择");
+    return;
+  }
+  const mapText = point.map_name || bundleMapName() || loadedMapName() || "-";
+  setText(
+    "selectedPoiMeta",
+    `${point.name} / x=${num(point.x)}, y=${num(point.y)}, yaw=${num(point.yaw)} / map=${mapText}`
+  );
 }
 
 function num(value) {
@@ -643,7 +874,7 @@ async function startMapping() {
 }
 
 async function stopMapping() {
-  if (!window.confirm("停止建图并调用底层 save_map 保存当前地图？")) {
+  if (!window.confirm("停止建图并调用 save_map 保存当前地图？")) {
     return;
   }
   const result = await api("/slam/stop_mapping", {
@@ -652,14 +883,18 @@ async function stopMapping() {
     timeoutMs: mapSaveTimeoutMs(),
   });
   if (resultOk(result)) {
-    await api("/slam/set_map_path", { method: "POST", body: currentMapPayload(), updateLast: false });
+    await api("/slam/set_map_path", {
+      method: "POST",
+      body: currentMapPayload(),
+      updateLast: false,
+      log: false,
+    });
   }
   await refresh(false);
-  activeStep("save");
 }
 
 async function saveMap() {
-  if (!window.confirm("重新调用底层 save_map 保存当前地图？这会再次触发地图保存服务。")) {
+  if (!window.confirm("重新调用 save_map 保存当前地图？")) {
     return;
   }
   const result = await api("/robot/map/save", {
@@ -668,13 +903,21 @@ async function saveMap() {
     timeoutMs: mapSaveTimeoutMs(),
   });
   if (resultOk(result)) {
-    await api("/slam/set_map_path", { method: "POST", body: currentMapPayload(), updateLast: false });
+    await api("/slam/set_map_path", {
+      method: "POST",
+      body: currentMapPayload(),
+      updateLast: false,
+      log: false,
+    });
   }
   await refresh(false);
 }
 
 async function setMapPathOnly() {
-  await api("/slam/set_map_path", { method: "POST", body: currentMapPayload() });
+  await api("/slam/set_map_path", {
+    method: "POST",
+    body: currentMapPayload(),
+  });
   await refresh(false);
 }
 
@@ -683,7 +926,21 @@ async function listMaps() {
   setJson("mapListBox", data);
 }
 
-async function loadMap() {
+async function loadMapOnly() {
+  await api("/slam/relocation", {
+    method: "POST",
+    body: {
+      ...currentMapPayload(),
+      ...poseBody(),
+      wait_for_localization: false,
+    },
+    timeoutMs: mapLoadTimeoutMs(),
+  });
+  await refresh(false);
+  activeStep("localization");
+}
+
+async function loadMapAndWait() {
   await api("/slam/relocation", {
     method: "POST",
     body: {
@@ -691,10 +948,32 @@ async function loadMap() {
       ...poseBody(),
       wait_for_localization: true,
     },
-    timeoutMs: mapLoadTimeoutMs(),
+    timeoutMs: localizationWaitTimeoutMs(),
   });
   await refresh(false);
   activeStep("localization");
+}
+
+async function loadBundleMap() {
+  if (!bundleMapPath()) {
+    setJson("lastResponse", { success: false, message: "当前没有点位文件绑定地图" });
+    return;
+  }
+  const pose = bundlePoseBody();
+  await api("/slam/relocation", {
+    method: "POST",
+    body: {
+      map_path: bundleMapPath(),
+      x: pose.x,
+      y: pose.y,
+      z: pose.z,
+      yaw: pose.yaw,
+      wait_for_localization: true,
+    },
+    timeoutMs: localizationWaitTimeoutMs(),
+  });
+  await refresh(false);
+  activeStep("verify");
 }
 
 async function publishInitialPose() {
@@ -717,7 +996,7 @@ async function savePoint() {
   }
   await api("/robot/poi/save_current", {
     method: "POST",
-    body: { name, map_name: mapNameValue() },
+    body: { name },
   });
   selectedPoi = name;
   await loadPoints(false);
@@ -734,6 +1013,12 @@ async function publishPointVisuals() {
   setJson("lastResponse", data);
 }
 
+async function reloadPointBundle() {
+  await api("/slam/load_nav_points", { method: "POST" });
+  await loadPoints(false);
+  await refresh(false);
+}
+
 async function clearPoints() {
   if (!window.confirm("确认清空当前点位？")) {
     return;
@@ -746,7 +1031,7 @@ async function clearPoints() {
 
 async function deletePoi(name) {
   const count = lastPointIssues.counts?.get(name) || 0;
-  const suffix = count > 1 ? `（将删除 ${count} 个同名点）` : "";
+  const suffix = count > 1 ? `（会删除 ${count} 个同名点）` : "";
   if (!window.confirm(`确认删除点位 ${name}${suffix}？`)) {
     return;
   }
@@ -766,7 +1051,7 @@ async function gotoPoi(name = $("poiSelect")?.value) {
   selectedPoi = name;
   const data = await api("/robot/navigation/goto_poi", {
     method: "POST",
-    body: { name, map_name: mapNameValue(), force: Boolean($("forceNav")?.checked) },
+    body: { name, force: Boolean($("forceNav")?.checked) },
   });
   setJson("verifyBox", data);
   await refresh(false);
@@ -863,31 +1148,40 @@ async function runAcceptance() {
     safeApi("/robot/workflow/status"),
     safeApi("/slam/nav_points"),
   ]);
-  const motion = workflow.motion_authority || motionAuthority(status);
-  const auroraRequired = Boolean(motion.aurora_required);
+  const motion = workflow.motion_authority || motionAuthority();
   const aurora = workflow.aurora || status.aurora || {};
   const mapping = workflow.manual_mapping || status.mapping_readiness || {};
   const poi = workflow.manual_poi || status.poi_readiness || {};
   const navigation = workflow.auto_navigation || status.readiness || {};
   const normalizedPoints = normalizePoints(points.nav_points || points.points || []);
   const issues = analyzePoints(normalizedPoints);
+  const bundlePathValue = points.map_file || "";
+  const currentPathValue = points.current_map || status.runtime?.current_map || "";
+  const bundleOk = Boolean(bundlePathValue && currentPathValue && bundlePathValue === currentPathValue);
   const checks = [
     ["Adapter", Boolean(health.ok), health.namespace || health.error || ""],
     ["ROS", Boolean(status.ros?.ready), status.ros?.error || "ready"],
     ["运动策略", true, `${motion.policy || "none"} / ${motion.authority || "external"}`],
-    ["Aurora", !auroraRequired || Boolean(aurora.connected), auroraRequired ? (aurora.standing ? "standing" : "required") : "optional"],
-    ["地图", Boolean(status.runtime?.current_map), status.runtime?.current_map || "-"],
-    ["手动建图", Boolean(mapping.ready), blockerText(mapping)],
-    ["手动打点", Boolean(poi.ready), blockerText(poi)],
-    ["点位", normalizedPoints.length > 0, `${normalizedPoints.length} 点`],
-    ["点位唯一", issues.duplicateNames.length === 0, issues.duplicateNames.length ? issues.duplicateNames.join(", ") : "ok"],
-    ["导航就绪", Boolean(navigation.ready), blockerText(navigation)],
+    ["Aurora", !motion.aurora_required || Boolean(aurora.connected), motion.aurora_required ? (aurora.standing ? "standing" : "required") : "optional"],
+    ["当前地图", Boolean(currentPathValue), currentPathValue || "-"],
+    ["建图 readiness", Boolean(mapping.ready), blockerText(mapping)],
+    ["打点 readiness", Boolean(poi.ready), blockerText(poi)],
+    ["点位数量", normalizedPoints.length > 0, `${normalizedPoints.length} 个点位`],
+    ["点位唯一性", issues.duplicateNames.length === 0, issues.duplicateNames.length ? issues.duplicateNames.join(", ") : "ok"],
+    ["点位地图绑定", bundleOk, bundleOk ? bundlePathValue : `${bundlePathValue || "-"} / ${currentPathValue || "-"}`],
+    ["导航 readiness", Boolean(navigation.ready), blockerText(navigation)],
   ];
   renderAcceptance(checks);
   const passed = checks.every(([, ok]) => ok);
-  setJson("acceptanceBox", { health, workflow, points, status, point_issues: issues });
+  setJson("acceptanceBox", {
+    health,
+    workflow,
+    status,
+    points,
+    point_issues: issues,
+  });
   setText("acceptanceSummary", passed ? "全部通过" : "存在待处理项");
-  setStepState("stepAcceptanceState", passed ? "通过" : "待处理");
+  setText("stepAcceptanceState", passed ? "通过" : "待处理");
 }
 
 async function safeApi(path) {
@@ -919,7 +1213,7 @@ function renderAcceptance(checks) {
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    setJson("lastResponse", { success: true, message: "已复制命令", command: text });
+    setJson("lastResponse", { success: true, message: "命令已复制", command: text });
   } catch {
     setJson("lastResponse", { success: false, message: "浏览器未允许剪贴板，命令如下", command: text });
   }
@@ -947,14 +1241,75 @@ async function runWithButton(buttonId, handler) {
 
 function updateControls() {
   const hasPoints = lastPoints.length > 0;
+  const poiReady = Boolean(pointReadiness().ready || lastSlamStatus.ready_for_poi);
+  const navReady = Boolean(navigationReadiness().ready);
   const runtime = lastStatus.runtime || {};
   const isCruising = Boolean(runtime.is_cruising || lastSlamStatus.is_cruising);
   const isPaused = Boolean(runtime.is_paused || lastSlamStatus.is_paused);
-  setDisabled("gotoPoiBtn", !selectedPoi);
-  setDisabled("startCruiseBtn", !hasPoints || isCruising);
+  const forceNav = Boolean($("forceNav")?.checked);
+  const forceCruise = Boolean($("forceCruise")?.checked);
+  const mapAligned = !bundleMapPath() || bundleMatchesCurrent();
+  const pointName = $("pointName")?.value.trim() || "";
+  const hasBundleMap = Boolean(bundleMapPath());
+  const currentMapLoaded = Boolean(loadedMapPath());
+  const selectedPoint = selectedPoiRecord();
+
+  setDisabled("savePointBtn", !pointName || !poiReady);
+  setDisabled("savePointsFileBtn", !hasPoints);
+  setDisabled("publishPointVisualsBtn", !hasPoints);
+  setDisabled("reloadPointsBtn", false);
+  setDisabled("clearPointsBtn", !hasPoints);
+  setDisabled("loadBundleMapBtn", !hasBundleMap);
+  setDisabled("gotoPoiBtn", !selectedPoi || ((!navReady || !mapAligned) && !forceNav));
+  setDisabled("startCruiseBtn", !hasPoints || isCruising || ((!navReady || !mapAligned) && !forceCruise));
   setDisabled("pauseBtn", !isCruising || isPaused);
   setDisabled("resumeBtn", !isCruising || !isPaused);
   setDisabled("stopCruiseBtn", !isCruising);
+
+  setActionHint(
+    "pointActionHint",
+    poiReady ? "ok" : "warn",
+    poiReady
+      ? "当前位置位姿可用，保存点位会直接绑定到当前真实加载地图。"
+      : "定位还没稳，暂不建议保存点位。等打点 readiness 变好再保存，能避开“点超出地图范围”的脏数据。"
+  );
+
+  let navHint = "先选一个点位。";
+  let navState = "warn";
+  if (selectedPoint) {
+    if (!currentMapLoaded) {
+      navHint = "还没加载地图。先去定位面板加载地图。";
+    } else if (!mapAligned && !forceNav) {
+      navHint = "点位文件地图和当前加载地图不一致。先按点位文件加载地图并定位。";
+    } else if (!navReady && !forceNav) {
+      navHint = `自动导航还没 ready：${blockerText(navigationReadiness())}`;
+    } else {
+      navState = "ok";
+      navHint = forceNav
+        ? "将按强制模式下发导航。注意先确认当前地图和环境一致。"
+        : "当前点位与地图关系正常，可以做单点验证。";
+    }
+  }
+  setActionHint("navActionHint", navState, navHint);
+
+  let cruiseHint = "至少需要一组可用点位。";
+  let cruiseState = "warn";
+  if (isCruising) {
+    cruiseState = "ok";
+    cruiseHint = isPaused ? "巡航已暂停，可以恢复或停止。" : "巡航运行中，留意事件流和当前目标。";
+  } else if (hasPoints) {
+    if (!mapAligned && !forceCruise) {
+      cruiseHint = "点位文件地图与当前加载地图不一致，暂不建议直接开始巡航。";
+    } else if (!navReady && !forceCruise) {
+      cruiseHint = `自动导航还没 ready：${blockerText(navigationReadiness())}`;
+    } else {
+      cruiseState = "ok";
+      cruiseHint = forceCruise
+        ? "将按强制模式开始巡航。确认路径和地图一致后再执行。"
+        : "点位和地图关系正常，可以开始巡航。";
+    }
+  }
+  setActionHint("cruiseActionHint", cruiseState, cruiseHint);
 }
 
 function setDisabled(id, disabled) {
@@ -975,6 +1330,7 @@ function bindEvents() {
   $$(".step").forEach((item) => {
     item.onclick = () => activeStep(item.dataset.step);
   });
+
   bindAction("refreshBtn", () => refresh(true));
   bindAction("runAcceptanceTopBtn", async () => {
     activeStep("acceptance");
@@ -983,6 +1339,11 @@ function bindEvents() {
   bindAction("ensureStandBtn", ensureStand);
   bindAction("stopMotionBtn", stopMotion);
   bindAction("auroraResetBtn", auroraReset);
+
+  bindAction("flowMappingBtn", async () => activeStep("mapping"));
+  bindAction("flowLocalizationBtn", async () => activeStep("localization"));
+  bindAction("flowNavigationBtn", async () => activeStep("verify"));
+
   bindAction("startMappingBtn", startMapping);
   bindAction("mappingStatusBtn", () => refresh(true));
   bindAction("copyMappingRvizBtn", () => copyText(rvizCommands.mapping));
@@ -990,27 +1351,35 @@ function bindEvents() {
   bindAction("saveMapBtn", saveMap);
   bindAction("setMapPathBtn", setMapPathOnly);
   bindAction("listMapsBtn", listMaps);
-  bindAction("loadMapBtn", loadMap);
+
+  bindAction("loadMapOnlyBtn", loadMapOnly);
+  bindAction("loadMapWaitBtn", loadMapAndWait);
+  bindAction("loadBundleMapBtn", loadBundleMap);
   bindAction("initialPoseBtn", publishInitialPose);
   bindAction("localizationStatusBtn", () => refresh(true));
   bindAction("copyLocalizationRvizBtn", () => copyText(rvizCommands.localization));
+
   bindAction("savePointBtn", savePoint);
   bindAction("savePointsFileBtn", savePointsFile);
   bindAction("publishPointVisualsBtn", publishPointVisuals);
-  bindAction("reloadPointsBtn", () => loadPoints(true));
+  bindAction("reloadPointsBtn", reloadPointBundle);
   bindAction("clearPointsBtn", clearPoints);
+
   bindAction("gotoPoiBtn", () => gotoPoi());
   bindAction("cancelNavBtn", cancelNavigation);
   bindAction("currentActionBtn", currentAction);
+
   bindAction("startCruiseBtn", startCruise);
   bindAction("pauseBtn", pauseCruise);
   bindAction("resumeBtn", resumeCruise);
   bindAction("stopCruiseBtn", stopCruise);
+
+  bindAction("runAcceptanceBtn", runAcceptance);
+
   const connectEventsBtn = $("connectEventsBtn");
   if (connectEventsBtn) {
     connectEventsBtn.onclick = connectEvents;
   }
-  bindAction("runAcceptanceBtn", runAcceptance);
 
   const poiSelect = $("poiSelect");
   if (poiSelect) {
@@ -1020,24 +1389,32 @@ function bindEvents() {
   if (pointSearch) {
     pointSearch.oninput = () => renderPoints(lastPoints);
   }
-  const pointName = $("pointName");
-  if (pointName) {
-    pointName.oninput = updateControls;
+  const pointNameInput = $("pointName");
+  if (pointNameInput) {
+    pointNameInput.oninput = updateControls;
   }
-  const mapName = $("mapName");
-  if (mapName) {
-    mapName.oninput = () => {
+  const mapNameInput = $("mapName");
+  if (mapNameInput) {
+    mapNameInput.oninput = () => {
       syncMapControls();
-      setText("saveNote", `目标：${currentMapPath()}`);
+      setText("saveNote", `目标地图: ${configuredMapPath()}`);
       renderPointBundle();
     };
   }
-  const mapPath = $("mapPath");
-  if (mapPath) {
-    mapPath.oninput = () => {
-      setText("saveNote", `目标：${currentMapPath()}`);
+  const mapPathInput = $("mapPath");
+  if (mapPathInput) {
+    mapPathInput.oninput = () => {
+      setText("saveNote", `目标地图: ${configuredMapPath()}`);
       renderPointBundle();
     };
+  }
+  const forceNav = $("forceNav");
+  if (forceNav) {
+    forceNav.onchange = updateControls;
+  }
+  const forceCruise = $("forceCruise");
+  if (forceCruise) {
+    forceCruise.onchange = updateControls;
   }
   const clearResponse = $("clearResponseBtn");
   if (clearResponse) {
@@ -1053,6 +1430,12 @@ function bindEvents() {
   }
 }
 
+function initStaticText() {
+  setText("mappingRvizCommand", rvizCommands.mapping);
+  setText("localizationRvizCommand", rvizCommands.localization);
+}
+
 bindEvents();
+initStaticText();
 refresh(false);
 window.setInterval(() => refresh(false), 5000);

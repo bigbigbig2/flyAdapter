@@ -763,6 +763,16 @@ class RobotService:
             time.sleep(0.2)
 
     def add_current_pose_to_nav_points(self, name: str = "") -> dict[str, Any]:
+        readiness = self.poi_readiness()
+        if not readiness["ready"]:
+            self.state.mark_error("poi save precheck failed", status_code=409)
+            return {
+                "success": False,
+                "message": "poi save precheck failed",
+                "precheck": {"ok": False, "readiness": readiness},
+                "status_code": 409,
+                **self.legacy_status(),
+            }
         points, map_file, initial_pose = self.store.load_nav_points()
         point_name = name or f"point_{len(points) + 1}"
         point = legacy_point_from_pose(point_name, self.get_pose())
@@ -780,11 +790,15 @@ class RobotService:
         points, map_file, initial_pose = self.store.load_nav_points()
         self.state.total_nav_points = len(points)
         effective_map = map_file or self.state.snapshot()["current_map"]
+        current_map = self.state.snapshot()["current_map"]
         return {
             "nav_points": points,
             "count": len(points),
             "map_file": effective_map,
             "map_name": self.store.map_name_from_path(effective_map),
+            "current_map": current_map,
+            "current_map_name": self.store.map_name_from_path(current_map),
+            "bundle_matches_current": bool(effective_map and current_map and effective_map == current_map),
             "initial_pose": initial_pose,
             "visualization_topics": self.ros.visualization_topics(),
             "unitree_style": True,
@@ -799,11 +813,16 @@ class RobotService:
 
     def load_nav_points(self) -> dict[str, Any]:
         points, map_file, _ = self.store.load_nav_points()
-        if map_file:
-            self._record_current_map(map_file)
         self.state.total_nav_points = len(points)
         status = self.legacy_status()
         status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
+        status["bundle"] = {
+            "map_file": map_file,
+            "map_name": self.store.map_name_from_path(map_file),
+            "current_map": self.state.snapshot()["current_map"],
+            "current_map_name": self.store.map_name_from_path(self.state.snapshot()["current_map"]),
+            "bundle_matches_current": bool(map_file and self.state.snapshot()["current_map"] and map_file == self.state.snapshot()["current_map"]),
+        }
         return status
 
     def clear_nav_points(self) -> dict[str, Any]:
@@ -820,17 +839,34 @@ class RobotService:
         except (FileNotFoundError, ValueError) as exc:
             self.state.mark_error(str(exc), status_code=404)
             return {"success": False, "message": str(exc), "status_code": 404}
-        self.store.save_nav_points(points, self.state.snapshot()["current_map"] or map_file, initial_pose)
-        if map_file:
-            self._record_current_map(map_file)
+        self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
         self.state.current_nav_name = name
         self.state.total_nav_points = len(points)
         status = self.legacy_status()
         status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
+        status["bundle"] = {
+            "map_file": map_file,
+            "map_name": self.store.map_name_from_path(map_file),
+            "current_map": self.state.snapshot()["current_map"],
+            "current_map_name": self.store.map_name_from_path(self.state.snapshot()["current_map"]),
+            "bundle_matches_current": bool(map_file and self.state.snapshot()["current_map"] and map_file == self.state.snapshot()["current_map"]),
+            "route_name": name,
+        }
         return status
 
     def navigate_to(self, target: dict[str, Any], label: str = "API Target", force: bool = False) -> dict[str, Any]:
         with self._nav_lock:
+            target_map = str(target.get("map_file") or "").strip()
+            current_map = str(self.state.snapshot()["current_map"] or "").strip()
+            if target_map and current_map and target_map != current_map and not force:
+                self.state.mark_error("target map does not match current loaded map", status_code=409)
+                return {
+                    "status": "blocked",
+                    "message": "target map does not match current loaded map",
+                    "target_map": target_map,
+                    "current_map": current_map,
+                    "status_code": 409,
+                }
             check = self.precheck_navigation(force=force)
             if not check["ok"]:
                 self.state.mark_error("navigation precheck failed", status_code=409)
@@ -860,6 +896,24 @@ class RobotService:
         if not points:
             self.state.mark_error("no navigation points", status_code=400)
             return {"status": "failed", "message": "no navigation points", **self.legacy_status()}
+        current_map = str(self.state.snapshot()["current_map"] or "").strip()
+        mismatches = sorted(
+            {
+                str(point.get("map_file") or "").strip()
+                for point in points
+                if str(point.get("map_file") or "").strip() and current_map and str(point.get("map_file") or "").strip() != current_map
+            }
+        )
+        if mismatches and not force:
+            self.state.mark_error("nav points belong to a different map", status_code=409)
+            return {
+                "status": "blocked",
+                "message": "nav points belong to a different map",
+                "current_map": current_map,
+                "point_maps": mismatches,
+                "status_code": 409,
+                **self.legacy_status(),
+            }
         check = self.precheck_navigation(force=force)
         if not check["ok"]:
             self.state.mark_error("cruise precheck failed", status_code=409)
@@ -975,10 +1029,31 @@ class RobotService:
         return self.relocation(path, x=x, y=y, z=z, yaw=yaw, wait_for_localization=wait)
 
     def save_current_poi(self, name: str, map_name: str | None = None, tags: list[str] | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        readiness = self.poi_readiness()
+        if not readiness["ready"]:
+            self.state.mark_error("poi save precheck failed", status_code=409)
+            return {
+                "success": False,
+                "message": "poi save precheck failed",
+                "precheck": {"ok": False, "readiness": readiness},
+                "status_code": 409,
+            }
         point = legacy_point_from_pose(name, self.get_pose())
         current_map = self.state.snapshot()["current_map"]
+        current_map_name = self.store.map_name_from_path(current_map)
+        requested_map_name = str(map_name or "").strip()
+        if requested_map_name and current_map_name and requested_map_name != current_map_name:
+            self.state.mark_error("requested map_name does not match current loaded map", status_code=409)
+            return {
+                "success": False,
+                "message": "requested map_name does not match current loaded map",
+                "requested_map_name": requested_map_name,
+                "current_map_name": current_map_name,
+                "current_map": current_map,
+                "status_code": 409,
+            }
         point["map_file"] = current_map
-        point["map_name"] = map_name or self.store.map_name_from_path(current_map)
+        point["map_name"] = current_map_name or requested_map_name
         if tags:
             point["tags"] = tags
         if meta:

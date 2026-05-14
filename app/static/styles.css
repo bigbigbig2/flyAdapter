@@ -44,6 +44,7 @@ button {
 }
 
 h1,
+h3,
 h2,
 p {
   margin: 0;
@@ -57,6 +58,11 @@ h1 {
 h2 {
   font-size: 18px;
   font-weight: 760;
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 800;
 }
 
 p {
@@ -179,6 +185,49 @@ p {
 
 .metric.wide strong {
   font-size: 13px;
+}
+
+.ops-strip {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(260px, 1.4fr);
+  gap: 10px;
+}
+
+.ops-card,
+.selection-card,
+.action-hint {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.ops-card {
+  min-height: 72px;
+  padding: 12px;
+}
+
+.ops-card.wide {
+  background: var(--surface-tint);
+  border-color: #b8d6da;
+}
+
+.ops-card span,
+.selection-card span,
+.action-hint span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.ops-card strong,
+.selection-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .map-bar {
@@ -447,6 +496,59 @@ select:focus {
   margin: 0;
 }
 
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.mode-card,
+.status-note,
+.flow-actions {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.mode-card {
+  min-height: 168px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.mode-card strong,
+.status-note strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.status-note {
+  margin: 14px 0;
+  padding: 12px 14px;
+}
+
+.status-note span,
+.flow-actions span:first-child {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.flow-actions {
+  margin-top: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .notice {
   margin-top: 12px;
   padding: 10px 12px;
@@ -456,6 +558,53 @@ select:focus {
   color: #6f4a06;
   font-size: 13px;
   font-weight: 760;
+}
+
+.notice.ok {
+  border-color: #aad7ba;
+  background: #f0faf3;
+  color: #13592d;
+}
+
+.notice.bad {
+  border-color: #edbbb7;
+  background: #fff2f1;
+  color: #7b211b;
+}
+
+.selection-card,
+.action-hint {
+  margin-top: 12px;
+  padding: 12px 14px;
+}
+
+.selection-card strong {
+  margin-top: 4px;
+}
+
+.action-hint {
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.action-hint.ok {
+  border-color: #aad7ba;
+  background: #f0faf3;
+  color: #13592d;
+}
+
+.action-hint.warn {
+  border-color: #e2c276;
+  background: #fff8e5;
+  color: #6f4a06;
+}
+
+.action-hint.bad {
+  border-color: #edbbb7;
+  background: #fff2f1;
+  color: #7b211b;
 }
 
 .bundle-panel {
@@ -567,6 +716,12 @@ select:focus {
   background: #fff8e5;
 }
 
+.point.selected {
+  background: #edf6f7;
+  border-left: 3px solid var(--primary);
+  padding-left: 9px;
+}
+
 .mini-actions {
   display: flex;
   justify-content: flex-end;
@@ -657,6 +812,10 @@ select:focus {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .ops-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .map-bar {
     grid-template-columns: minmax(180px, 240px) 1fr 150px 160px;
   }
@@ -667,6 +826,10 @@ select:focus {
 
   .bundle-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mode-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -709,8 +872,10 @@ select:focus {
   }
 
   .overview,
+  .ops-strip,
   .map-bar,
   .workflow,
+  .mode-grid,
   .status-grid,
   .form-grid,
   .form-grid.two,
@@ -730,5 +895,10 @@ select:focus {
 
   .mini-actions {
     justify-content: flex-start;
+  }
+
+  .flow-actions {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
