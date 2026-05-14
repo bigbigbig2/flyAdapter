@@ -156,7 +156,12 @@
             <button id="copyMappingRvizBtn" class="btn">复制 RViz 命令</button>
           </div>
           <pre id="mappingRvizCommand" class="command">cd ~/aurora_ws/flyAdapter || exit 1
-./scripts/open_rviz.sh mapping</pre>
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+rviz2 -d rviz/mapping_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static</pre>
 
           <div class="status-grid">
             <div class="status-box"><span>模式</span><strong id="mappingModeCheck">-</strong></div>
@@ -216,7 +221,12 @@
             <button id="copyLocalizationRvizBtn" class="btn">复制 RViz 命令</button>
           </div>
           <pre id="localizationRvizCommand" class="command">cd ~/aurora_ws/flyAdapter || exit 1
-./scripts/open_rviz.sh relocation</pre>
+source /opt/ros/humble/setup.bash
+source /opt/fftai/humanoidnav/install/setup.bash
+rviz2 -d rviz/relocation_GR301AA0025.rviz \
+  --ros-args \
+  -r tf:=/GR301AA0025/tf \
+  -r tf_static:=/GR301AA0025/tf_static</pre>
           <pre id="localizationBox" class="console"></pre>
         </section>
 
@@ -240,10 +250,30 @@
             </label>
           </div>
 
+          <div class="bundle-panel">
+            <div>
+              <span>点位文件模型</span>
+              <strong id="pointBundleStyle">Unitree navigation_points.json</strong>
+            </div>
+            <div>
+              <span>绑定地图</span>
+              <strong id="pointBundleMap">-</strong>
+            </div>
+            <div>
+              <span>地图名</span>
+              <strong id="pointBundleName">-</strong>
+            </div>
+            <div class="wide">
+              <span>RViz 话题</span>
+              <strong id="pointBundleTopics">-</strong>
+            </div>
+          </div>
+          <div id="bundleNotice" class="notice hidden"></div>
           <div id="duplicateNotice" class="notice hidden"></div>
           <div class="toolbar">
             <button id="savePointBtn" class="btn primary">保存当前位置</button>
             <button id="savePointsFileBtn" class="btn">保存点位文件</button>
+            <button id="publishPointVisualsBtn" class="btn">刷新 RViz 点位</button>
             <button id="reloadPointsBtn" class="btn">刷新点位</button>
             <button id="clearPointsBtn" class="btn danger">清空点位</button>
           </div>

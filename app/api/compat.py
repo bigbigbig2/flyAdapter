@@ -130,6 +130,12 @@ def load_nav_points(request: Request) -> dict:
     return service(request).load_nav_points()
 
 
+@router.post("/slam/visualize_nav_points", summary="刷新 RViz 导航点可视化")
+def visualize_nav_points(request: Request) -> dict:
+    """兼容 Unitree 风格流程：把当前导航点文件发布到 RViz MarkerArray/Path。"""
+    return service(request).refresh_nav_visualization(clear_goal=True)
+
+
 @router.post("/slam/clear_nav_points", summary="清空导航点")
 def clear_nav_points(request: Request) -> dict:
     """清空本地导航点，并把巡航 index 重置为 0。"""

@@ -4,8 +4,8 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const jsonHeaders = { "Content-Type": "application/json" };
 const requestTimeoutMs = 12000;
 const rvizCommands = {
-  mapping: "cd ~/aurora_ws/flyAdapter || exit 1\n./scripts/open_rviz.sh mapping",
-  localization: "cd ~/aurora_ws/flyAdapter || exit 1\n./scripts/open_rviz.sh relocation",
+  mapping: "cd ~/aurora_ws/flyAdapter || exit 1\nsource /opt/ros/humble/setup.bash\nsource /opt/fftai/humanoidnav/install/setup.bash\nrviz2 -d rviz/mapping_GR301AA0025.rviz \\\n  --ros-args \\\n  -r tf:=/GR301AA0025/tf \\\n  -r tf_static:=/GR301AA0025/tf_static",
+  localization: "cd ~/aurora_ws/flyAdapter || exit 1\nsource /opt/ros/humble/setup.bash\nsource /opt/fftai/humanoidnav/install/setup.bash\nrviz2 -d rviz/relocation_GR301AA0025.rviz \\\n  --ros-args \\\n  -r tf:=/GR301AA0025/tf \\\n  -r tf_static:=/GR301AA0025/tf_static",
 };
 
 let refreshing = false;
@@ -15,6 +15,13 @@ let lastStatus = {};
 let lastSlamStatus = {};
 let lastPoints = [];
 let lastPointIssues = { duplicateNames: [], duplicateCount: 0 };
+let currentPointBundle = {
+  map_file: "",
+  map_name: "",
+  initial_pose: {},
+  visualization_topics: {},
+  unitree_style: true,
+};
 let currentMapConfig = {
   map_root: "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps",
   default_map_name: "map",
@@ -417,9 +424,17 @@ async function refresh(updateLast = false) {
 async function loadPoints(updateLast = true) {
   const data = await api("/slam/nav_points", { updateLast, log: updateLast });
   lastPoints = normalizePoints(data.nav_points || data.points || []);
+  currentPointBundle = {
+    map_file: data.map_file || "",
+    map_name: data.map_name || "",
+    initial_pose: data.initial_pose || {},
+    visualization_topics: data.visualization_topics || {},
+    unitree_style: data.unitree_style !== false,
+  };
   lastPointIssues = analyzePoints(lastPoints);
   renderPoints(lastPoints);
   updatePointSummary();
+  renderPointBundle();
   return data;
 }
 
@@ -487,6 +502,29 @@ function updatePointSummary() {
   updateControls();
 }
 
+function renderPointBundle() {
+  const topics = currentPointBundle.visualization_topics || {};
+  const currentMap = currentMapPath();
+  const bundleMap = currentPointBundle.map_file || "-";
+  const style = currentPointBundle.unitree_style ? "Unitree navigation_points.json" : "custom";
+  setText("pointBundleStyle", style);
+  setText("pointBundleMap", bundleMap);
+  setText("pointBundleName", currentPointBundle.map_name || "-");
+  setText("pointBundleTopics", [topics.nav_points, topics.current_goal, topics.cruise_path].filter(Boolean).join(" / ") || "-");
+
+  const notice = $("bundleNotice");
+  if (!notice) {
+    return;
+  }
+  if (bundleMap !== "-" && currentMap !== "-" && bundleMap !== currentMap) {
+    notice.classList.remove("hidden");
+    notice.textContent = `点位文件绑定地图 ${bundleMap}，顶部当前目标地图是 ${currentMap}。请先确认地图和点位属于同一张图。`;
+  } else {
+    notice.classList.add("hidden");
+    notice.textContent = "";
+  }
+}
+
 function renderPoints(points) {
   const list = $("pointsList");
   const select = $("poiSelect");
@@ -522,7 +560,8 @@ function renderPoints(points) {
     title.textContent = duplicate ? `${point.name}（重复）` : point.name;
 
     const coords = document.createElement("span");
-    coords.textContent = `x=${num(point.x)}, y=${num(point.y)}, yaw=${num(point.yaw)} / ${point.frame_id}`;
+    const mapText = point.map_name ? ` / map=${point.map_name}` : "";
+    coords.textContent = `x=${num(point.x)}, y=${num(point.y)}, yaw=${num(point.yaw)} / ${point.frame_id}${mapText}`;
 
     const actions = document.createElement("div");
     actions.className = "mini-actions";
@@ -688,6 +727,11 @@ async function savePoint() {
 async function savePointsFile() {
   await api("/slam/save_nav_points", { method: "POST" });
   await loadPoints(false);
+}
+
+async function publishPointVisuals() {
+  const data = await api("/robot/visualization/nav_points", { method: "POST" });
+  setJson("lastResponse", data);
 }
 
 async function clearPoints() {
@@ -952,6 +996,7 @@ function bindEvents() {
   bindAction("copyLocalizationRvizBtn", () => copyText(rvizCommands.localization));
   bindAction("savePointBtn", savePoint);
   bindAction("savePointsFileBtn", savePointsFile);
+  bindAction("publishPointVisualsBtn", publishPointVisuals);
   bindAction("reloadPointsBtn", () => loadPoints(true));
   bindAction("clearPointsBtn", clearPoints);
   bindAction("gotoPoiBtn", () => gotoPoi());
@@ -984,12 +1029,14 @@ function bindEvents() {
     mapName.oninput = () => {
       syncMapControls();
       setText("saveNote", `目标：${currentMapPath()}`);
+      renderPointBundle();
     };
   }
   const mapPath = $("mapPath");
   if (mapPath) {
     mapPath.oninput = () => {
       setText("saveNote", `目标：${currentMapPath()}`);
+      renderPointBundle();
     };
   }
   const clearResponse = $("clearResponseBtn");

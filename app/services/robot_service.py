@@ -46,6 +46,7 @@ class RobotService:
     def start(self) -> None:
         self.aurora.start()
         self.ros.start()
+        threading.Thread(target=self._publish_visualization_when_ready, name="nav-visualization-bootstrap", daemon=True).start()
 
     def stop(self) -> None:
         self.stop_cruise()
@@ -476,6 +477,7 @@ class RobotService:
             return {**self.legacy_status(), "result": result}
         if result.get("success", True):
             self._record_current_map(path, map_name=map_name)
+            result["visualization"] = self.refresh_nav_visualization(clear_goal=True)
         if wait_for_localization:
             result["wait"] = self.wait_for_localization()
         return {**self.legacy_status(), "result": result}
@@ -713,6 +715,53 @@ class RobotService:
             time.sleep(0.2)
         return {"ready": False, "elapsed_sec": round(time.monotonic() - start, 2), "readiness": self.poi_readiness()}
 
+    def refresh_nav_visualization(
+        self,
+        active_name: str | None = None,
+        current_goal: dict[str, Any] | None = None,
+        clear_goal: bool = False,
+    ) -> dict[str, Any]:
+        points, map_file, initial_pose = self.store.load_nav_points()
+        effective_map = map_file or self.state.snapshot()["current_map"]
+        self.state.total_nav_points = len(points)
+        result = {
+            "success": True,
+            "count": len(points),
+            "map_file": effective_map,
+            "map_name": self.store.map_name_from_path(effective_map),
+            "initial_pose": initial_pose,
+            "topics": self.ros.visualization_topics(),
+        }
+        nav_points = self._safe_visual_call(
+            lambda: self.ros.publish_nav_points(points, map_file=effective_map, active_name=active_name),
+            "publish_nav_points",
+        )
+        cruise_path = self._safe_visual_call(
+            lambda: self.ros.publish_cruise_path(points, map_file=effective_map),
+            "publish_cruise_path",
+        )
+        result["nav_points"] = nav_points
+        result["cruise_path"] = cruise_path
+        if current_goal is not None or clear_goal:
+            result["current_goal"] = self._safe_visual_call(
+                lambda: self.ros.publish_current_goal(current_goal),
+                "publish_current_goal",
+            )
+        result["success"] = all(
+            item.get("success") is not False
+            for item in result.values()
+            if isinstance(item, dict) and ("success" in item)
+        )
+        return result
+
+    def _publish_visualization_when_ready(self) -> None:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self.ros.ready:
+                self.refresh_nav_visualization(clear_goal=True)
+                return
+            time.sleep(0.2)
+
     def add_current_pose_to_nav_points(self, name: str = "") -> dict[str, Any]:
         points, map_file, initial_pose = self.store.load_nav_points()
         point_name = name or f"point_{len(points) + 1}"
@@ -721,32 +770,49 @@ class RobotService:
         point["map_file"] = current_map
         point["map_name"] = self.store.map_name_from_path(current_map)
         points.append(point)
-        self.store.save_nav_points(points, map_file or current_map, initial_pose)
+        self.store.save_nav_points(points, current_map or map_file, initial_pose)
         self.state.total_nav_points = len(points)
-        return self.legacy_status()
+        status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization(active_name=point_name, current_goal=point)
+        return status
 
     def nav_points_response(self) -> dict[str, Any]:
-        points, _, _ = self.store.load_nav_points()
+        points, map_file, initial_pose = self.store.load_nav_points()
         self.state.total_nav_points = len(points)
-        return {"nav_points": points, "count": len(points)}
+        effective_map = map_file or self.state.snapshot()["current_map"]
+        return {
+            "nav_points": points,
+            "count": len(points),
+            "map_file": effective_map,
+            "map_name": self.store.map_name_from_path(effective_map),
+            "initial_pose": initial_pose,
+            "visualization_topics": self.ros.visualization_topics(),
+            "unitree_style": True,
+        }
 
     def save_nav_points(self) -> dict[str, Any]:
-        points, _, initial_pose = self.store.load_nav_points()
-        self.store.save_nav_points(points, self.state.snapshot()["current_map"], initial_pose)
-        return self.legacy_status()
+        points, map_file, initial_pose = self.store.load_nav_points()
+        self.store.save_nav_points(points, self.state.snapshot()["current_map"] or map_file, initial_pose)
+        status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization()
+        return status
 
     def load_nav_points(self) -> dict[str, Any]:
         points, map_file, _ = self.store.load_nav_points()
         if map_file:
             self._record_current_map(map_file)
         self.state.total_nav_points = len(points)
-        return self.legacy_status()
+        status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
+        return status
 
     def clear_nav_points(self) -> dict[str, Any]:
         self.store.save_nav_points([], self.state.snapshot()["current_map"])
         self.state.current_nav_index = 0
         self.state.total_nav_points = 0
-        return self.legacy_status()
+        status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
+        return status
 
     def load_nav_points_by_name(self, name: str) -> dict[str, Any]:
         try:
@@ -754,12 +820,14 @@ class RobotService:
         except (FileNotFoundError, ValueError) as exc:
             self.state.mark_error(str(exc), status_code=404)
             return {"success": False, "message": str(exc), "status_code": 404}
-        self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
+        self.store.save_nav_points(points, self.state.snapshot()["current_map"] or map_file, initial_pose)
         if map_file:
             self._record_current_map(map_file)
         self.state.current_nav_name = name
         self.state.total_nav_points = len(points)
-        return self.legacy_status()
+        status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
+        return status
 
     def navigate_to(self, target: dict[str, Any], label: str = "API Target", force: bool = False) -> dict[str, Any]:
         with self._nav_lock:
@@ -774,6 +842,7 @@ class RobotService:
                 return {"status": "blocked", "message": "ensure_stand failed", "motion_guard": motion_guard, "status_code": 409}
 
             self.state.set_navigation_task({"status": "running", "label": label, "target": target, "started_at": now_ms()})
+            visualization = self.refresh_nav_visualization(active_name=label, current_goal=target)
             result = self._safe_ros_call(lambda: self.ros.navigate_to_pose(target, wait=False), "navigate_to")
             self.state.set_current_action({"action_name": "navigate_to_pose", "target": target, "result": result})
             return {
@@ -781,6 +850,7 @@ class RobotService:
                 "message": "Navigation command sent",
                 "target": target,
                 "motion_guard": motion_guard,
+                "visualization": visualization,
                 "status_code": self.state.status_code,
                 "result": result,
             }
@@ -811,10 +881,11 @@ class RobotService:
         self.state.is_arrived = False
         self.state.current_nav_index = 0
         self.state.total_nav_points = len(points)
+        visualization = self.refresh_nav_visualization(active_name=str(points[0].get("name", "")), current_goal=points[0])
         self.events.publish({"event_type": "cruise_start", "timestamp": now_ms(), "total_points": len(points), "first_target": points[0]})
         self._cruise_thread = threading.Thread(target=self._cruise_loop, args=(points,), name="cruise-runner", daemon=True)
         self._cruise_thread.start()
-        return {**self.legacy_status(), "motion_guard": motion_guard}
+        return {**self.legacy_status(), "motion_guard": motion_guard, "visualization": visualization}
 
     def stop_cruise(self, cancel_robot: bool = True) -> dict[str, Any]:
         was_cruising = self.state.snapshot()["is_cruising"]
@@ -838,6 +909,7 @@ class RobotService:
         if was_cruising:
             self.events.publish({"event_type": "cruise_stop", "timestamp": now_ms(), "completed_points": self.state.current_nav_index, "total_points": self.state.total_nav_points})
         status = self.legacy_status()
+        status["visualization"] = self.refresh_nav_visualization(clear_goal=True)
         if motion_stop is not None:
             status["motion_stop"] = motion_stop
         return status
@@ -850,7 +922,12 @@ class RobotService:
         self.state.is_cruising = False
         self.state.is_paused = False
         self.state.set_navigation_task({"status": "idle"})
-        return {"result": result, "motion_stop": motion_stop, "status": self.legacy_status()}
+        return {
+            "result": result,
+            "motion_stop": motion_stop,
+            "visualization": self.refresh_nav_visualization(clear_goal=True),
+            "status": self.legacy_status(),
+        }
 
     def pause_nav(self) -> dict[str, Any]:
         self._cruise_pause.set()
@@ -909,27 +986,45 @@ class RobotService:
         points, map_file, initial_pose = self.store.load_nav_points()
         points = [p for p in points if p.get("name") != name]
         points.append(point)
-        self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
-        return {"success": True, "poi": point}
+        self.store.save_nav_points(points, self.state.snapshot()["current_map"] or map_file, initial_pose)
+        return {"success": True, "poi": point, "visualization": self.refresh_nav_visualization(active_name=name, current_goal=point)}
 
     def upsert_poi(self, point: dict[str, Any]) -> dict[str, Any]:
         points, map_file, initial_pose = self.store.load_nav_points()
         points = [p for p in points if p.get("name") != point.get("name")]
         points.append(point)
-        self.store.save_nav_points(points, map_file or self.state.snapshot()["current_map"], initial_pose)
-        return {"success": True, "poi": point}
+        self.store.save_nav_points(points, self.state.snapshot()["current_map"] or map_file, initial_pose)
+        return {
+            "success": True,
+            "poi": point,
+            "visualization": self.refresh_nav_visualization(active_name=point.get("name"), current_goal=point),
+        }
 
     def delete_poi(self, name: str) -> dict[str, Any]:
         points, map_file, initial_pose = self.store.load_nav_points()
         new_points = [p for p in points if p.get("name") != name]
-        self.store.save_nav_points(new_points, map_file or self.state.snapshot()["current_map"], initial_pose)
-        return {"success": len(new_points) != len(points), "count": len(new_points)}
+        self.store.save_nav_points(new_points, self.state.snapshot()["current_map"] or map_file, initial_pose)
+        return {
+            "success": len(new_points) != len(points),
+            "count": len(new_points),
+            "visualization": self.refresh_nav_visualization(clear_goal=True),
+        }
 
-    def goto_poi(self, name: str, force: bool = False) -> dict[str, Any]:
+    def goto_poi(self, name: str, force: bool = False, map_name: str | None = None) -> dict[str, Any]:
         points, _, _ = self.store.load_nav_points()
-        for point in points:
-            if point.get("name") == name:
-                return self.navigate_to(point, label=name, force=force)
+        matches = [point for point in points if point.get("name") == name]
+        requested_map = str(map_name or "").strip()
+        if requested_map:
+            scoped = [point for point in matches if not point.get("map_name") or point.get("map_name") == requested_map]
+            if scoped:
+                matches = scoped
+        else:
+            current_map_name = self.store.map_name_from_path(self.state.snapshot()["current_map"])
+            scoped = [point for point in matches if not point.get("map_name") or point.get("map_name") == current_map_name]
+            if scoped:
+                matches = scoped
+        if matches:
+            return self.navigate_to(matches[0], label=name, force=force)
         return {"status": "failed", "message": f"poi not found: {name}", "status_code": 404}
 
     def current_action(self) -> dict[str, Any]:
@@ -999,6 +1094,7 @@ class RobotService:
             target = points[index]
             self.state.current_target = target
             self.state.is_arrived = False
+            self._safe_visual_call(lambda: self.ros.publish_current_goal(target), "publish_current_goal")
             self.events.publish({"event_type": "nav_start", "timestamp": now_ms(), "target": target, "index": index + 1, "total": len(points)})
             result = self._safe_ros_call(
                 lambda: self.ros.navigate_to_pose(target, wait=True, timeout_sec=self.config.nav_goal_timeout_sec),
@@ -1015,9 +1111,18 @@ class RobotService:
         if not self._cruise_stop.is_set() and self.state.current_nav_index >= len(points):
             self.state.is_cruising = False
             self.state.is_paused = False
+            self._safe_visual_call(lambda: self.ros.publish_current_goal(None), "publish_current_goal")
             self.events.publish({"event_type": "cruise_complete", "timestamp": now_ms(), "message": "all navigation points completed", "total_points": len(points), "current_nav_name": self.state.current_nav_name})
         if self._cruise_thread is threading.current_thread():
             self._cruise_thread = None
+
+    def _safe_visual_call(self, fn: Any, action_name: str) -> dict[str, Any]:
+        try:
+            return fn()
+        except BridgeUnavailable as exc:
+            return {"success": False, "message": str(exc), "action": action_name, "status_code": -1}
+        except Exception as exc:
+            return {"success": False, "message": str(exc), "action": action_name, "status_code": -1}
 
     def _safe_ros_call(self, fn: Any, action_name: str) -> dict[str, Any]:
         try:

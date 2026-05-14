@@ -262,16 +262,16 @@ cd ~/aurora_ws/flyAdapter || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
-./scripts/open_rviz.sh mapping
-```
-
-等价命令：
-
-```bash
 rviz2 -d rviz/mapping_GR301AA0025.rviz \
   --ros-args \
   -r tf:=/GR301AA0025/tf \
   -r tf_static:=/GR301AA0025/tf_static
+```
+
+说明：如果 `./scripts/open_rviz.sh mapping` 在 SSH 环境下提示权限问题，直接使用上面的 `rviz2 -d ...` 命令。脚本只是封装，RViz 实际启动命令等价。
+
+```bash
+bash ./scripts/open_rviz.sh mapping
 ```
 
 RViz 重点看：
@@ -417,16 +417,16 @@ cd ~/aurora_ws/flyAdapter || exit 1
 source /opt/ros/humble/setup.bash
 source /opt/fftai/humanoidnav/install/setup.bash
 
-./scripts/open_rviz.sh relocation
-```
-
-等价命令：
-
-```bash
 rviz2 -d rviz/relocation_GR301AA0025.rviz \
   --ros-args \
   -r tf:=/GR301AA0025/tf \
   -r tf_static:=/GR301AA0025/tf_static
+```
+
+说明：如果 `./scripts/open_rviz.sh relocation` 在 SSH 环境下提示权限问题，直接使用上面的 `rviz2 -d ...` 命令。脚本只是封装，RViz 实际启动命令等价。
+
+```bash
+bash ./scripts/open_rviz.sh relocation
 ```
 
 检查定位：

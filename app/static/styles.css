@@ -458,6 +458,39 @@ select:focus {
   font-weight: 760;
 }
 
+.bundle-panel {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) minmax(140px, 0.8fr);
+  gap: 10px;
+}
+
+.bundle-panel div {
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.bundle-panel .wide {
+  grid-column: 1 / -1;
+}
+
+.bundle-panel span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.bundle-panel strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .hidden {
   display: none !important;
 }
@@ -631,6 +664,10 @@ select:focus {
   .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .bundle-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 940px) {
@@ -676,7 +713,8 @@ select:focus {
   .workflow,
   .status-grid,
   .form-grid,
-  .form-grid.two {
+  .form-grid.two,
+  .bundle-panel {
     grid-template-columns: 1fr;
   }
 

@@ -30,6 +30,9 @@ class RosBridge:
         self._types: dict[str, Any] = {}
         self._nav_client: Any | None = None
         self._initial_pose_pub: Any | None = None
+        self._nav_points_pub: Any | None = None
+        self._current_goal_pub: Any | None = None
+        self._cruise_path_pub: Any | None = None
         self._last_pose_event_s = 0.0
 
     def start(self) -> None:
@@ -59,6 +62,7 @@ class RosBridge:
             "ros_domain_id": os.getenv("ROS_DOMAIN_ID", ""),
             "rmw_implementation": os.getenv("RMW_IMPLEMENTATION", ""),
             "clients": clients,
+            "visualization_topics": self.visualization_topics(),
         }
 
     def service_ready(self, client_name: str) -> bool:
@@ -140,6 +144,86 @@ class RosBridge:
         self._initial_pose_pub.publish(msg)
         return {"success": True, "message": "initial pose published"}
 
+    def visualization_topics(self) -> dict[str, str]:
+        return {
+            "nav_points": self.config.ros_name("gr3/nav_points"),
+            "current_goal": self.config.ros_name("gr3/current_goal"),
+            "cruise_path": self.config.ros_name("gr3/cruise_path"),
+        }
+
+    def publish_nav_points(
+        self,
+        points: list[dict[str, Any]],
+        map_file: str = "",
+        active_name: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_ready()
+        if self._nav_points_pub is None:
+            raise BridgeUnavailable("nav point marker publisher is not ready")
+        MarkerArray = self._require_type("MarkerArray")
+        msg = MarkerArray()
+        msg.markers.append(self._delete_all_marker("gr3_nav_points"))
+        stamp = self._node.get_clock().now().to_msg()
+        for index, point in enumerate(points):
+            active = bool(active_name and point.get("name") == active_name)
+            msg.markers.extend(self._point_markers(point, index, "gr3_nav_points", stamp, active=active))
+        self._nav_points_pub.publish(msg)
+        return {
+            "success": True,
+            "message": "nav point markers published",
+            "count": len(points),
+            "map_file": map_file,
+            "topics": self.visualization_topics(),
+        }
+
+    def publish_current_goal(self, point: dict[str, Any] | None) -> dict[str, Any]:
+        self._require_ready()
+        if self._current_goal_pub is None:
+            raise BridgeUnavailable("current goal marker publisher is not ready")
+        MarkerArray = self._require_type("MarkerArray")
+        msg = MarkerArray()
+        msg.markers.append(self._delete_all_marker("gr3_current_goal"))
+        if point:
+            stamp = self._node.get_clock().now().to_msg()
+            msg.markers.extend(self._point_markers(point, 0, "gr3_current_goal", stamp, active=True, label_prefix="GOAL "))
+        self._current_goal_pub.publish(msg)
+        return {
+            "success": True,
+            "message": "current goal marker published" if point else "current goal marker cleared",
+            "target": point,
+            "topics": self.visualization_topics(),
+        }
+
+    def publish_cruise_path(self, points: list[dict[str, Any]], map_file: str = "") -> dict[str, Any]:
+        self._require_ready()
+        if self._cruise_path_pub is None:
+            raise BridgeUnavailable("cruise path publisher is not ready")
+        Path = self._require_type("Path")
+        PoseStamped = self._require_type("PoseStamped")
+        msg = Path()
+        msg.header.frame_id = self._frame_id(points[0]) if points else "map"
+        msg.header.stamp = self._node.get_clock().now().to_msg()
+        for point in points:
+            pose = PoseStamped()
+            pose.header.frame_id = self._frame_id(point)
+            pose.header.stamp = msg.header.stamp
+            pose.pose.position.x = float(point.get("x", 0.0))
+            pose.pose.position.y = float(point.get("y", 0.0))
+            pose.pose.position.z = float(point.get("z", 0.0))
+            pose.pose.orientation.x = float(point.get("q_x", 0.0))
+            pose.pose.orientation.y = float(point.get("q_y", 0.0))
+            pose.pose.orientation.z = float(point.get("q_z", 0.0))
+            pose.pose.orientation.w = float(point.get("q_w", 1.0))
+            msg.poses.append(pose)
+        self._cruise_path_pub.publish(msg)
+        return {
+            "success": True,
+            "message": "cruise path published",
+            "count": len(points),
+            "map_file": map_file,
+            "topics": self.visualization_topics(),
+        }
+
     def navigate_to_pose(
         self,
         pose: dict[str, Any],
@@ -191,11 +275,14 @@ class RosBridge:
             from action_msgs.msg import GoalStatus
             from fourier_msgs.msg import ActionStatus, EventsInfo, HealthInfo
             from fourier_msgs.srv import CancelCurrentAction, GetCurrentAction, LoadMap, SaveMap, SetMode
-            from geometry_msgs.msg import PoseWithCovarianceStamped
+            from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
             from nav2_msgs.action import NavigateToPose
+            from nav_msgs.msg import Path
             from rclpy.action import ActionClient
             from rclpy.node import Node
+            from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
             from std_msgs.msg import Float32, Int8, String
+            from visualization_msgs.msg import Marker, MarkerArray
         except Exception as exc:
             self.available = False
             self.ready = False
@@ -211,8 +298,12 @@ class RosBridge:
                 "SaveMap": SaveMap,
                 "SetMode": SetMode,
                 "PoseWithCovarianceStamped": PoseWithCovarianceStamped,
+                "PoseStamped": PoseStamped,
                 "NavigateToPose": NavigateToPose,
                 "GoalStatus": GoalStatus,
+                "Marker": Marker,
+                "MarkerArray": MarkerArray,
+                "Path": Path,
             }
         )
 
@@ -228,8 +319,6 @@ class RosBridge:
             node.create_subscription(ActionStatus, self.config.ros_name("action_status"), self._on_action_status, 10)
             node.create_subscription(HealthInfo, self.config.ros_name("Humanoid_nav/health"), self._on_health, 10)
             node.create_subscription(EventsInfo, self.config.ros_name("Humanoid_nav/events"), self._on_events, 10)
-            # Import inside the thread to keep local dev environments working.
-            from geometry_msgs.msg import PoseStamped
 
             node.create_subscription(PoseStamped, self.config.ros_name("robot_pose"), self._on_robot_pose, 20)
 
@@ -243,6 +332,18 @@ class RosBridge:
             self._nav_client = ActionClient(node, NavigateToPose, self.config.ros_name("navigate_to_pose"))
             self._initial_pose_pub = node.create_publisher(
                 PoseWithCovarianceStamped, self.config.ros_name("initialpose"), 10
+            )
+            visual_qos = QoSProfile(depth=1)
+            visual_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+            visual_qos.reliability = ReliabilityPolicy.RELIABLE
+            self._nav_points_pub = node.create_publisher(
+                MarkerArray, self.config.ros_name("gr3/nav_points"), visual_qos
+            )
+            self._current_goal_pub = node.create_publisher(
+                MarkerArray, self.config.ros_name("gr3/current_goal"), visual_qos
+            )
+            self._cruise_path_pub = node.create_publisher(
+                Path, self.config.ros_name("gr3/cruise_path"), visual_qos
             )
             self.ready = True
             self.error = None
@@ -327,6 +428,89 @@ class RosBridge:
             events.append(payload)
             self.events.publish(payload)
         self.state.update_events(events)
+
+    def _delete_all_marker(self, namespace: str) -> Any:
+        Marker = self._require_type("Marker")
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self._node.get_clock().now().to_msg()
+        marker.ns = namespace
+        marker.action = getattr(Marker, "DELETEALL", 3)
+        return marker
+
+    def _point_markers(
+        self,
+        point: dict[str, Any],
+        index: int,
+        namespace: str,
+        stamp: Any,
+        active: bool = False,
+        label_prefix: str = "",
+    ) -> list[Any]:
+        Marker = self._require_type("Marker")
+        base_id = index * 3
+        name = str(point.get("name") or f"point_{index + 1}")
+        frame_id = self._frame_id(point)
+        x = float(point.get("x", 0.0))
+        y = float(point.get("y", 0.0))
+        z = float(point.get("z", 0.0))
+        sphere_color = (1.0, 0.62, 0.12, 0.95) if active else (0.1, 0.55, 1.0, 0.85)
+        text_color = (1.0, 0.92, 0.35, 1.0) if active else (0.86, 0.96, 1.0, 1.0)
+
+        sphere = self._marker(Marker, namespace, base_id, frame_id, stamp, getattr(Marker, "SPHERE", 2))
+        sphere.pose.position.x = x
+        sphere.pose.position.y = y
+        sphere.pose.position.z = z + 0.12
+        sphere.pose.orientation.w = 1.0
+        sphere.scale.x = 0.28 if active else 0.22
+        sphere.scale.y = 0.28 if active else 0.22
+        sphere.scale.z = 0.28 if active else 0.22
+        self._set_color(sphere, sphere_color)
+
+        arrow = self._marker(Marker, namespace, base_id + 1, frame_id, stamp, getattr(Marker, "ARROW", 0))
+        arrow.pose.position.x = x
+        arrow.pose.position.y = y
+        arrow.pose.position.z = z + 0.16
+        arrow.pose.orientation.x = float(point.get("q_x", 0.0))
+        arrow.pose.orientation.y = float(point.get("q_y", 0.0))
+        arrow.pose.orientation.z = float(point.get("q_z", 0.0))
+        arrow.pose.orientation.w = float(point.get("q_w", 1.0))
+        arrow.scale.x = 0.55 if active else 0.42
+        arrow.scale.y = 0.08
+        arrow.scale.z = 0.08
+        self._set_color(arrow, sphere_color)
+
+        text = self._marker(Marker, namespace, base_id + 2, frame_id, stamp, getattr(Marker, "TEXT_VIEW_FACING", 9))
+        text.pose.position.x = x
+        text.pose.position.y = y
+        text.pose.position.z = z + 0.58
+        text.pose.orientation.w = 1.0
+        text.scale.z = 0.24 if active else 0.2
+        text.text = f"{label_prefix}{index + 1}. {name}"
+        self._set_color(text, text_color)
+        return [sphere, arrow, text]
+
+    @staticmethod
+    def _marker(Marker: Any, namespace: str, marker_id: int, frame_id: str, stamp: Any, marker_type: int) -> Any:
+        marker = Marker()
+        marker.header.frame_id = frame_id
+        marker.header.stamp = stamp
+        marker.ns = namespace
+        marker.id = marker_id
+        marker.type = marker_type
+        marker.action = getattr(Marker, "ADD", 0)
+        return marker
+
+    @staticmethod
+    def _set_color(marker: Any, rgba: tuple[float, float, float, float]) -> None:
+        marker.color.r = rgba[0]
+        marker.color.g = rgba[1]
+        marker.color.b = rgba[2]
+        marker.color.a = rgba[3]
+
+    @staticmethod
+    def _frame_id(point: dict[str, Any]) -> str:
+        return str(point.get("frame_id") or "map")
 
     def _call_service(self, client_name: str, req: Any, timeout_sec: float = 10.0) -> dict[str, Any]:
         self._require_ready()

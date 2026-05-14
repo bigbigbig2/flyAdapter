@@ -39,6 +39,7 @@ class JsonStore:
     ) -> None:
         payload = {
             "map_file": map_file,
+            "map_name": self.map_name_from_path(map_file),
             "initial_pose": initial_pose
             or {"x": 0.0, "y": 0.0, "z": 0.0, "q_x": 0.0, "q_y": 0.0, "q_z": 0.0, "q_w": 1.0},
             "navigation_points": points,

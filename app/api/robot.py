@@ -164,7 +164,13 @@ def goto_pose(request: Request, body: GotoPoseRequest) -> dict:
 @router.post("/navigation/goto_poi", summary="按 POI 名称导航")
 def goto_poi(request: Request, body: GotoPoiRequest) -> dict:
     """从本地导航点中查找 POI，再复用坐标导航。"""
-    return service(request).goto_poi(body.name, force=body.force)
+    return service(request).goto_poi(body.name, force=body.force, map_name=body.map_name)
+
+
+@router.post("/visualization/nav_points", summary="刷新 RViz 点位可视化")
+def visualization_nav_points(request: Request) -> dict:
+    """把当前 Unitree 风格导航点文件发布为 RViz MarkerArray/Path。"""
+    return service(request).refresh_nav_visualization(clear_goal=True)
 
 
 @router.post("/navigation/cancel", summary="取消当前导航")
