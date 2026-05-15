@@ -10,39 +10,35 @@
   <header class="topbar">
     <div class="brand">
       <h1>GR3 现场操作台</h1>
-      <span id="namespaceLabel">GR3</span>
+      <span id="namespaceLabel">-</span>
     </div>
     <div class="top-actions">
       <a class="btn ghost" href="/docs" target="_blank" rel="noreferrer">Swagger</a>
       <button id="refreshBtn" class="btn">刷新</button>
-      <div class="online-pill" aria-live="polite">
+      <div class="online-pill">
         <span id="adapterDot" class="dot"></span>
-        <span id="adapterText">检查中</span>
+        <span id="adapterText">等待连接</span>
       </div>
     </div>
   </header>
 
   <main class="page">
-    <section class="overview" aria-label="总览">
-      <div class="metric">
-        <span>Adapter</span>
-        <strong id="adapterStatus">-</strong>
-      </div>
+    <section class="overview">
       <div class="metric">
         <span>ROS</span>
         <strong id="rosStatus">-</strong>
       </div>
       <div class="metric">
-        <span>运动策略</span>
-        <strong id="motionStatus">-</strong>
+        <span>SLAM 模式</span>
+        <strong id="slamMode">-</strong>
       </div>
       <div class="metric">
-        <span>SLAM</span>
-        <strong id="slamStatus">-</strong>
+        <span>定位状态</span>
+        <strong id="localizationState">-</strong>
       </div>
       <div class="metric">
-        <span>导航就绪</span>
-        <strong id="navigationReady">-</strong>
+        <span>导航状态</span>
+        <strong id="navState">-</strong>
       </div>
       <div class="metric wide">
         <span>当前加载地图</span>
@@ -50,137 +46,85 @@
       </div>
     </section>
 
-    <section class="map-bar" aria-label="地图参数">
+    <section class="map-bar">
       <label class="field">
-        <span>目标地图名</span>
+        <span>地图名</span>
         <input id="mapName" placeholder="map" autocomplete="off" />
       </label>
       <label class="field grow">
-        <span>绝对路径覆盖</span>
+        <span>地图绝对路径</span>
         <input id="mapPath" placeholder="留空则使用 MAP_ROOT/地图名" autocomplete="off" />
       </label>
       <div class="quick-state">
-        <span>当前地图名</span>
-        <strong id="currentMapName">-</strong>
+        <span>目标地图</span>
+        <strong id="targetMap">-</strong>
       </div>
       <div class="quick-state">
         <span>位姿时效</span>
         <strong id="poseAge">-</strong>
       </div>
-      <div class="quick-state">
-        <span>任务</span>
-        <strong id="navTask">-</strong>
-      </div>
     </section>
 
-    <section class="ops-strip" aria-label="当前局面">
-      <div class="ops-card">
-        <span>当前加载地图</span>
-        <strong id="opsCurrentMap">-</strong>
-      </div>
-      <div class="ops-card">
+    <section class="decision-strip">
+      <div>
         <span>点位文件地图</span>
-        <strong id="opsBundleMap">-</strong>
+        <strong id="bundleMap">-</strong>
       </div>
-      <div class="ops-card">
-        <span>定位 / 打点</span>
-        <strong id="opsPoseState">-</strong>
+      <div>
+        <span>地图匹配</span>
+        <strong id="mapMatch">-</strong>
       </div>
-      <div class="ops-card wide">
-        <span>现在最适合做的动作</span>
-        <strong id="opsActionState">-</strong>
+      <div class="wide">
+        <span>建议下一步</span>
+        <strong id="nextAction">-</strong>
       </div>
     </section>
 
     <div class="shell">
-      <aside class="workflow" aria-label="流程">
-        <button class="step active" data-step="check">
-          <span class="step-index">1</span>
-          <span class="step-title">启动检查</span>
-          <small id="stepCheckState">待检查</small>
-        </button>
-        <button class="step" data-step="mapping">
-          <span class="step-index">2</span>
-          <span class="step-title">建图与保存</span>
-          <small id="stepMappingState">待开始</small>
-        </button>
-        <button class="step" data-step="localization">
-          <span class="step-index">3</span>
-          <span class="step-title">加载地图定位</span>
-          <small id="stepLocalizationState">待加载</small>
-        </button>
-        <button class="step" data-step="points">
-          <span class="step-index">4</span>
-          <span class="step-title">打点</span>
-          <small id="stepPointsState">0 个点位</small>
-        </button>
-        <button class="step" data-step="verify">
-          <span class="step-index">5</span>
-          <span class="step-title">单点验证</span>
-          <small id="stepVerifyState">待选择</small>
-        </button>
-        <button class="step" data-step="cruise">
-          <span class="step-index">6</span>
-          <span class="step-title">巡航</span>
-          <small id="stepCruiseState">待启动</small>
-        </button>
-        <button class="step" data-step="acceptance">
-          <span class="step-index">7</span>
-          <span class="step-title">验收</span>
-          <small id="stepAcceptanceState">待检查</small>
-        </button>
+      <aside class="workflow">
+        <button class="step active" data-step="check"><strong>1</strong><span>总览检查</span><small id="stepCheck">-</small></button>
+        <button class="step" data-step="mapping"><strong>2</strong><span>建图保存</span><small id="stepMapping">-</small></button>
+        <button class="step" data-step="localization"><strong>3</strong><span>加载定位</span><small id="stepLocalization">-</small></button>
+        <button class="step" data-step="points"><strong>4</strong><span>打点管理</span><small id="stepPoints">0 个点</small></button>
+        <button class="step" data-step="navigate"><strong>5</strong><span>单点导航</span><small id="stepNavigate">-</small></button>
+        <button class="step" data-step="cruise"><strong>6</strong><span>巡航</span><small id="stepCruise">-</small></button>
       </aside>
 
       <section class="workspace">
-        <section class="step-panel active" data-panel="check">
+        <section class="panel active" data-panel="check">
           <div class="panel-head">
             <div>
-              <h2>启动检查</h2>
+              <h2>总览检查</h2>
               <p id="healthLine">等待状态刷新</p>
             </div>
-            <button id="runAcceptanceTopBtn" class="btn primary">验收检查</button>
-          </div>
-
-          <div class="status-grid">
-            <div class="status-box"><span>Adapter</span><strong id="checkAdapter">-</strong></div>
-            <div class="status-box"><span>ROS Bridge</span><strong id="checkRos">-</strong></div>
-            <div class="status-box"><span>建图</span><strong id="checkMapping">-</strong></div>
-            <div class="status-box"><span>打点</span><strong id="checkPoi">-</strong></div>
-            <div class="status-box"><span>自动导航</span><strong id="checkNavigation">-</strong></div>
-            <div class="status-box"><span>Aurora</span><strong id="checkAurora">-</strong></div>
-            <div class="status-box wide"><span>控制权</span><strong id="checkBody">-</strong></div>
+            <span id="checkBadge" class="badge">-</span>
           </div>
 
           <div class="mode-grid">
-            <div class="mode-card">
-              <div>
-                <h3>只建图</h3>
-                <p>切 mapping，手动走图，结束时保存落盘。</p>
-              </div>
-              <strong id="flowMappingStatus">-</strong>
-              <button id="flowMappingBtn" class="btn">打开建图面板</button>
-            </div>
-            <div class="mode-card">
-              <div>
-                <h3>加载地图去定位 / 打点</h3>
-                <p>先加载地图，再等定位稳定后保存 POI。</p>
-              </div>
-              <strong id="flowLocalizationStatus">-</strong>
-              <button id="flowLocalizationBtn" class="btn">打开定位面板</button>
-            </div>
-            <div class="mode-card">
-              <div>
-                <h3>按点位文件加载地图并导航</h3>
-                <p>点位文件绑定地图，地图一致后再做单点验证或巡航。</p>
-              </div>
-              <strong id="flowNavigationStatus">-</strong>
-              <button id="flowNavigationBtn" class="btn">打开导航面板</button>
-            </div>
+            <button id="goMappingBtn" class="mode-card" type="button">
+              <strong>只建图</strong>
+              <span>进入 mapping，手动走图，然后停止并保存。</span>
+              <em id="flowMapping">-</em>
+            </button>
+            <button id="goLocalizationBtn" class="mode-card" type="button">
+              <strong>加载地图去定位 / 打点</strong>
+              <span>加载地图，等定位稳定，再保存 POI。</span>
+              <em id="flowLocalization">-</em>
+            </button>
+            <button id="goNavigateBtn" class="mode-card" type="button">
+              <strong>加载地图和点位去导航</strong>
+              <span>先按点位文件绑定地图定位，再单点验证或巡航。</span>
+              <em id="flowNavigation">-</em>
+            </button>
           </div>
 
-          <div class="status-note">
-            <span>建议下一步</span>
-            <strong id="nextAction">-</strong>
+          <div class="status-grid">
+            <div class="status-box"><span>ROS Bridge</span><strong id="checkRos">-</strong></div>
+            <div class="status-box"><span>建图 readiness</span><strong id="checkMapping">-</strong></div>
+            <div class="status-box"><span>打点 readiness</span><strong id="checkPoi">-</strong></div>
+            <div class="status-box"><span>导航 readiness</span><strong id="checkNav">-</strong></div>
+            <div class="status-box"><span>Aurora</span><strong id="checkAurora">-</strong></div>
+            <div class="status-box"><span>运动控制</span><strong id="checkMotion">-</strong></div>
           </div>
 
           <div class="toolbar">
@@ -191,157 +135,95 @@
           <pre id="readinessBox" class="console"></pre>
         </section>
 
-        <section class="step-panel" data-panel="mapping">
+        <section class="panel" data-panel="mapping">
           <div class="panel-head">
             <div>
-              <h2>建图与保存</h2>
-              <p id="saveNote">目标地图: -</p>
+              <h2>建图保存</h2>
+              <p id="mappingHint">目标地图使用顶部输入。</p>
             </div>
-            <span id="mappingHint" class="badge">待确认</span>
+            <span id="mappingBadge" class="badge">-</span>
           </div>
 
           <div class="toolbar">
             <button id="startMappingBtn" class="btn primary">开始建图</button>
             <button id="stopMappingBtn" class="btn primary">停止建图并保存</button>
             <button id="saveMapBtn" class="btn">重试保存地图</button>
-            <button id="setMapPathBtn" class="btn">仅记录路径</button>
+            <button id="setMapPathBtn" class="btn">仅记录当前地图路径</button>
             <button id="listMapsBtn" class="btn">列出地图</button>
-            <button id="mappingStatusBtn" class="btn">刷新状态</button>
-            <button id="copyMappingRvizBtn" class="btn">复制 RViz 命令</button>
+            <button id="copyMappingRvizBtn" class="btn">复制建图 RViz 命令</button>
           </div>
-
           <pre id="mappingRvizCommand" class="command"></pre>
-
-          <div class="status-grid">
-            <div class="status-box"><span>模式</span><strong id="mappingModeCheck">-</strong></div>
-            <div class="status-box"><span>位姿</span><strong id="mappingPoseCheck">-</strong></div>
-            <div class="status-box"><span>健康</span><strong id="mappingHealthCheck">-</strong></div>
-            <div class="status-box"><span>控制源</span><strong id="mappingControlSource">-</strong></div>
-          </div>
           <pre id="mappingBox" class="console compact"></pre>
           <pre id="mapListBox" class="console compact"></pre>
         </section>
 
-        <section class="step-panel" data-panel="localization">
+        <section class="panel" data-panel="localization">
           <div class="panel-head">
             <div>
               <h2>加载地图定位</h2>
-              <p id="localizationSummary">当前未加载地图</p>
+              <p id="localizationHint">只看图可仅加载；要打点或导航请等待定位稳定。</p>
             </div>
-            <span id="localizationHint" class="badge">待加载</span>
+            <span id="localizationBadge" class="badge">-</span>
           </div>
 
           <div class="form-grid">
-            <label class="field">
-              <span>X</span>
-              <input id="initX" type="number" value="0" step="0.1" />
-            </label>
-            <label class="field">
-              <span>Y</span>
-              <input id="initY" type="number" value="0" step="0.1" />
-            </label>
-            <label class="field">
-              <span>Yaw</span>
-              <input id="initYaw" type="number" value="0" step="0.1" />
-            </label>
+            <label class="field"><span>X</span><input id="initX" type="number" value="0" step="0.1" /></label>
+            <label class="field"><span>Y</span><input id="initY" type="number" value="0" step="0.1" /></label>
+            <label class="field"><span>Yaw</span><input id="initYaw" type="number" value="0" step="0.1" /></label>
           </div>
 
           <div class="toolbar">
             <button id="loadMapOnlyBtn" class="btn">仅加载地图</button>
             <button id="loadMapWaitBtn" class="btn primary">加载并等待定位稳定</button>
             <button id="loadBundleMapBtn" class="btn">按点位文件加载地图并定位</button>
-            <button id="initialPoseBtn" class="btn">仅发布初始位姿</button>
-            <button id="localizationStatusBtn" class="btn">刷新状态</button>
-            <button id="copyLocalizationRvizBtn" class="btn">复制 RViz 命令</button>
+            <button id="initialPoseBtn" class="btn">发布初始位姿</button>
+            <button id="copyLocalizationRvizBtn" class="btn">复制定位 RViz 命令</button>
           </div>
-
-          <div id="localizationActionHint" class="action-hint">-</div>
+          <div id="localizationNotice" class="notice">-</div>
           <pre id="localizationRvizCommand" class="command"></pre>
-          <div id="localizationNotice" class="notice hidden"></div>
           <pre id="localizationBox" class="console"></pre>
         </section>
 
-        <section class="step-panel" data-panel="points">
+        <section class="panel" data-panel="points">
           <div class="panel-head">
             <div>
-              <h2>打点</h2>
+              <h2>打点管理</h2>
               <p id="pointsSummary">暂无点位</p>
             </div>
-            <span id="pointsHint" class="badge">0 个点位</span>
+            <span id="pointsBadge" class="badge">0 个点</span>
           </div>
 
           <div class="form-grid two">
-            <label class="field">
-              <span>点位名称</span>
-              <input id="pointName" value="lobby_01_start" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>搜索点位</span>
-              <input id="pointSearch" placeholder="按名称过滤" autocomplete="off" />
-            </label>
+            <label class="field"><span>点位名称</span><input id="pointName" value="lobby_01_start" autocomplete="off" /></label>
+            <label class="field"><span>搜索点位</span><input id="pointSearch" placeholder="按名称过滤" autocomplete="off" /></label>
           </div>
 
           <div class="bundle-panel">
-            <div>
-              <span>点位文件模型</span>
-              <strong id="pointBundleStyle">-</strong>
-            </div>
-            <div>
-              <span>点位文件绑定地图</span>
-              <strong id="pointBundleMap">-</strong>
-            </div>
-            <div>
-              <span>点位文件地图名</span>
-              <strong id="pointBundleName">-</strong>
-            </div>
-            <div>
-              <span>当前加载地图</span>
-              <strong id="pointBundleCurrentMap">-</strong>
-            </div>
-            <div>
-              <span>当前加载地图名</span>
-              <strong id="pointBundleCurrentName">-</strong>
-            </div>
-            <div>
-              <span>初始位姿</span>
-              <strong id="pointBundleInitialPose">-</strong>
-            </div>
-            <div class="wide">
-              <span>RViz 话题</span>
-              <strong id="pointBundleTopics">-</strong>
-            </div>
+            <div><span>点位文件绑定地图</span><strong id="pointBundleMap">-</strong></div>
+            <div><span>当前加载地图</span><strong id="pointCurrentMap">-</strong></div>
+            <div><span>初始位姿</span><strong id="pointInitialPose">-</strong></div>
+            <div class="wide"><span>RViz 话题</span><strong id="pointTopics">-</strong></div>
           </div>
 
-          <div class="flow-actions">
-            <span>点位文件与当前地图</span>
-            <span id="bundleMatchBadge" class="badge">待检查</span>
-          </div>
-
-          <div id="bundleNotice" class="notice hidden"></div>
-          <div id="duplicateNotice" class="notice hidden"></div>
-
+          <div id="pointsNotice" class="notice">-</div>
           <div class="toolbar">
-            <button id="savePointBtn" class="btn primary">保存当前位置</button>
-            <button id="savePointsFileBtn" class="btn">保存点位文件</button>
+            <button id="savePointBtn" class="btn primary">保存当前位置为点位</button>
             <button id="reloadPointsBtn" class="btn">重新读取点位文件</button>
+            <button id="savePointsFileBtn" class="btn">保存点位文件</button>
             <button id="publishPointVisualsBtn" class="btn">刷新 RViz 点位</button>
             <button id="clearPointsBtn" class="btn danger">清空点位</button>
           </div>
-
-          <div id="pointActionHint" class="action-hint">-</div>
-          <div id="pointsList" class="point-list" aria-live="polite"></div>
+          <div id="pointsList" class="point-list"></div>
         </section>
 
-        <section class="step-panel" data-panel="verify">
+        <section class="panel" data-panel="navigate">
           <div class="panel-head">
             <div>
-              <h2>单点验证</h2>
-              <p id="verifySummary">未选择目标</p>
+              <h2>单点导航</h2>
+              <p id="selectedPoiText">未选择目标点</p>
             </div>
-            <span id="verifyHint" class="badge">待选择</span>
+            <span id="navigateBadge" class="badge">-</span>
           </div>
-
-          <div id="navigationNotice" class="notice hidden"></div>
 
           <label class="field">
             <span>目标点位</span>
@@ -352,33 +234,29 @@
             <span>强制下发</span>
           </label>
 
-          <div class="selection-card">
-            <span>当前选中点位</span>
-            <strong id="selectedPoiMeta">-</strong>
-          </div>
-
+          <div id="navNotice" class="notice">-</div>
           <div class="toolbar">
             <button id="gotoPoiBtn" class="btn primary">导航到点位</button>
             <button id="cancelNavBtn" class="btn danger">取消导航</button>
             <button id="currentActionBtn" class="btn">当前动作</button>
           </div>
-          <div id="navActionHint" class="action-hint">-</div>
           <pre id="verifyBox" class="console"></pre>
         </section>
 
-        <section class="step-panel" data-panel="cruise">
+        <section class="panel" data-panel="cruise">
           <div class="panel-head">
             <div>
               <h2>巡航</h2>
               <p id="cruiseSummary">未启动</p>
             </div>
-            <span id="cruiseHint" class="badge">待启动</span>
+            <span id="cruiseBadge" class="badge">-</span>
           </div>
 
           <label class="switch">
             <input id="forceCruise" type="checkbox" />
             <span>强制开始</span>
           </label>
+          <div id="cruiseNotice" class="notice">-</div>
           <div class="toolbar">
             <button id="startCruiseBtn" class="btn primary">开始巡航</button>
             <button id="pauseBtn" class="btn">暂停</button>
@@ -386,21 +264,8 @@
             <button id="stopCruiseBtn" class="btn danger">停止巡航</button>
             <button id="connectEventsBtn" class="btn">连接事件</button>
           </div>
-          <div id="cruiseActionHint" class="action-hint">-</div>
           <pre id="cruiseBox" class="console compact"></pre>
           <pre id="eventsLog" class="console events"></pre>
-        </section>
-
-        <section class="step-panel" data-panel="acceptance">
-          <div class="panel-head">
-            <div>
-              <h2>验收</h2>
-              <p id="acceptanceSummary">待检查</p>
-            </div>
-            <button id="runAcceptanceBtn" class="btn primary">运行检查</button>
-          </div>
-          <div id="acceptanceList" class="checklist"></div>
-          <pre id="acceptanceBox" class="console compact"></pre>
         </section>
       </section>
     </div>
