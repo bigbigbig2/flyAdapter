@@ -4,10 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GR3 核心控制台</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260515-2" />
 </head>
 <body>
   <header class="app-header">
@@ -159,10 +156,14 @@
             </div>
             <div class="action-grid">
               <div class="form-grid">
-                <label class="field"><span>X</span><input id="initX" type="number" value="0" step="0.1" /></label>
-                <label class="field"><span>Y</span><input id="initY" type="number" value="0" step="0.1" /></label>
-                <label class="field"><span>Yaw</span><input id="initYaw" type="number" value="0" step="0.1" /></label>
+                <label class="field"><span>X</span><input id="initX" type="number" placeholder="不填则使用已保存位姿" step="0.1" /></label>
+                <label class="field"><span>Y</span><input id="initY" type="number" placeholder="不填则使用已保存位姿" step="0.1" /></label>
+                <label class="field"><span>Yaw</span><input id="initYaw" type="number" placeholder="弧度" step="0.1" /></label>
               </div>
+              <label class="field inline">
+                <input id="allowZeroInitialPose" type="checkbox" />
+                <span>允许原点初始化</span>
+              </label>
               <button class="button ghost" data-action="publishInitialPose">发布</button>
             </div>
           </div>
@@ -298,6 +299,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260515-2"></script>
 </body>
 </html>

@@ -46,6 +46,7 @@ class RelocationRequest(BaseModel):
     y: float | None = Field(default=None, description="兼容旧接口的初始 y 坐标")
     z: float | None = Field(default=None, description="兼容旧接口的初始 z 坐标")
     yaw: float | None = Field(default=None, description="兼容旧接口的初始航向角，单位弧度")
+    allow_zero_initial_pose: bool = Field(default=False, description="确实要从原点初始化时才设为 true")
     wait_for_localization: bool = Field(default=False, description="是否等待 odom_status_code 变为 GOOD 后再返回")
 
 
@@ -85,19 +86,21 @@ class MapSaveRequest(BaseModel):
 class MapLoadRequest(BaseModel):
     map_path: str | None = Field(default=None, description="地图绝对路径；为空时可使用 map_name")
     map_name: str | None = Field(default=None, description="MAP_ROOT 下的地图目录名")
-    x: float = Field(default=0.0, description="加载地图后的初始 x 坐标")
-    y: float = Field(default=0.0, description="加载地图后的初始 y 坐标")
-    z: float = Field(default=0.0, description="加载地图后的初始 z 坐标")
-    yaw: float = Field(default=0.0, description="加载地图后的初始航向角，单位弧度")
+    x: float | None = Field(default=None, description="加载地图后的初始 x 坐标")
+    y: float | None = Field(default=None, description="加载地图后的初始 y 坐标")
+    z: float | None = Field(default=None, description="加载地图后的初始 z 坐标")
+    yaw: float | None = Field(default=None, description="加载地图后的初始航向角，单位弧度")
+    allow_zero_initial_pose: bool = Field(default=False, description="确实要从原点初始化时才设为 true")
     wait_for_localization: bool = Field(default=True, description="是否等待定位状态 GOOD 后再返回")
 
 
 class MapLoadByNameRequest(BaseModel):
     map_name: str = Field(description="MAP_ROOT 下的地图目录名")
-    x: float = Field(default=0.0, description="加载地图后的初始 x 坐标")
-    y: float = Field(default=0.0, description="加载地图后的初始 y 坐标")
-    z: float = Field(default=0.0, description="加载地图后的初始 z 坐标")
-    yaw: float = Field(default=0.0, description="加载地图后的初始航向角，单位弧度")
+    x: float | None = Field(default=None, description="加载地图后的初始 x 坐标")
+    y: float | None = Field(default=None, description="加载地图后的初始 y 坐标")
+    z: float | None = Field(default=None, description="加载地图后的初始 z 坐标")
+    yaw: float | None = Field(default=None, description="加载地图后的初始航向角，单位弧度")
+    allow_zero_initial_pose: bool = Field(default=False, description="确实要从原点初始化时才设为 true")
     wait_for_localization: bool = Field(default=True, description="是否等待定位状态 GOOD 后再返回")
 
 

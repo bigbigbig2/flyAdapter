@@ -129,6 +129,8 @@ def map_load(request: Request, body: MapLoadRequest) -> dict:
         y=body.y,
         z=body.z,
         yaw=body.yaw,
+        initial_pose_provided=bool({"x", "y", "z", "yaw"}.intersection(body.model_fields_set)),
+        allow_zero_initial_pose=body.allow_zero_initial_pose,
         wait_for_localization=body.wait_for_localization,
     )
 
@@ -136,7 +138,16 @@ def map_load(request: Request, body: MapLoadRequest) -> dict:
 @router.post("/map/load_by_name", summary="按名称加载地图")
 def map_load_by_name(request: Request, body: MapLoadByNameRequest) -> dict:
     """在 `MAP_ROOT` 下按地图目录名解析路径，再调用 `/robot/map/load`。"""
-    return service(request).load_map_by_name(body.map_name, body.x, body.y, body.z, body.yaw, body.wait_for_localization)
+    return service(request).load_map_by_name(
+        body.map_name,
+        body.x,
+        body.y,
+        body.z,
+        body.yaw,
+        body.wait_for_localization,
+        initial_pose_provided=bool({"x", "y", "z", "yaw"}.intersection(body.model_fields_set)),
+        allow_zero_initial_pose=body.allow_zero_initial_pose,
+    )
 
 
 @router.post("/localization/initial_pose", summary="发布初始位姿")
@@ -197,7 +208,7 @@ def poi_list(request: Request, use_current_map: bool = Query(default=False)) -> 
     points = service(request).nav_points_response()["nav_points"]
     if use_current_map:
         current_map = service(request).state.snapshot()["current_map"]
-        points = [p for p in points if not p.get("map_file") or p.get("map_file") == current_map]
+        points = [p for p in points if current_map and p.get("map_file") == current_map]
     return {"points": points, "count": len(points)}
 
 
@@ -253,13 +264,26 @@ def patrol_start(request: Request, body: PatrolStartRequest) -> dict:
     route = next((item for item in data.get("routes", []) if item.get("name") == body.route_name), None)
     if route is None:
         return {"success": False, "message": f"route not found: {body.route_name}"}
-    all_points = service(request).nav_points_response()["nav_points"]
+    current_map = service(request).state.snapshot()["current_map"]
+    current_map_name = service(request).store.map_name_from_path(current_map)
+    route_map_name = str(route.get("map_name") or body.map_name or "").strip()
+    if route_map_name and route_map_name != current_map_name:
+        return {
+            "success": False,
+            "message": "route map_name does not match current loaded map",
+            "route_map_name": route_map_name,
+            "current_map_name": current_map_name,
+        }
+    all_points = [
+        point
+        for point in service(request).nav_points_response()["nav_points"]
+        if current_map and point.get("map_file") == current_map
+    ]
     selected = [point for name in route.get("points", []) for point in all_points if point.get("name") == name]
     if not selected:
-        return {"success": False, "message": "route has no valid points"}
-    service(request).store.save_nav_points(selected, service(request).state.snapshot()["current_map"])
+        return {"success": False, "message": "route has no valid points for current loaded map"}
     service(request).state.current_nav_name = body.route_name
-    return service(request).start_cruise(force=body.force)
+    return service(request).start_cruise(force=body.force, points_override=selected)
 
 
 @router.post("/patrol/stop", summary="停止巡航路线")

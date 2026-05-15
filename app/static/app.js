@@ -42,11 +42,13 @@ let pointBundle = {
   visualization_topics: {},
 };
 let mapConfig = {
-  map_root: "/opt/fftai/nav",
+  map_root: "",
   default_map_name: "map",
-  default_map_path: "/opt/fftai/nav/map",
+  default_map_path: "",
   current_map: "",
   current_map_name: "",
+  target_map: "",
+  target_map_name: "",
   save_timeout_sec: 10,
   load_timeout_sec: 10,
 };
@@ -179,25 +181,68 @@ function targetMapPayload() {
   return {};
 }
 
-function posePayload() {
-  return {
-    x: numberOrZero($("initX")?.value),
-    y: numberOrZero($("initY")?.value),
-    z: 0,
-    yaw: numberOrZero($("initYaw")?.value),
+function initialPosePayload({ requireExplicit = false } = {}) {
+  const raw = {
+    x: $("initX")?.value.trim() ?? "",
+    y: $("initY")?.value.trim() ?? "",
+    yaw: $("initYaw")?.value.trim() ?? "",
   };
+  const provided = Object.entries(raw).filter(([, value]) => value !== "").map(([key]) => key);
+  if (!provided.length) {
+    if (requireExplicit) throw new Error("请填写初始位姿 x / y / yaw");
+    return {};
+  }
+  const missing = Object.entries(raw).filter(([, value]) => value === "").map(([key]) => key);
+  if (missing.length) throw new Error(`初始位姿不完整，缺少：${missing.join(", ")}`);
+  const payload = {
+    x: numberOrNull(raw.x),
+    y: numberOrNull(raw.y),
+    z: 0,
+    yaw: numberOrNull(raw.yaw),
+  };
+  if ([payload.x, payload.y, payload.yaw].some((value) => value === null)) throw new Error("初始位姿必须是数字");
+  const allowZero = Boolean($("allowZeroInitialPose")?.checked);
+  const isZero = Math.abs(payload.x) < 1e-6 && Math.abs(payload.y) < 1e-6 && Math.abs(payload.yaw) < 1e-6;
+  if (isZero && !allowZero) throw new Error("初始位姿为原点。确认机器人就在地图原点时，请勾选“允许原点初始化”。");
+  if (allowZero) payload.allow_zero_initial_pose = true;
+  return payload;
 }
 
 function bundlePosePayload() {
   const pose = pointBundle.initial_pose || {};
-  const hasPose = ["x", "y", "z", "yaw"].some((key) => pose[key] !== undefined && pose[key] !== null && pose[key] !== "");
-  if (!hasPose) return posePayload();
-  return { x: numberOrZero(pose.x), y: numberOrZero(pose.y), z: numberOrZero(pose.z), yaw: numberOrZero(pose.yaw) };
+  if (!hasStoredInitialPose(pose)) return {};
+  return {
+    x: numberOrZero(pose.x),
+    y: numberOrZero(pose.y),
+    z: numberOrZero(pose.z),
+    yaw: pose.yaw !== undefined ? numberOrZero(pose.yaw) : yawFromQuaternion(pose),
+    source: pose.source || "stored",
+  };
 }
 
 function numberOrZero(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function numberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function yawFromQuaternion(pose) {
+  const qx = numberOrZero(pose.q_x);
+  const qy = numberOrZero(pose.q_y);
+  const qz = numberOrZero(pose.q_z);
+  const qw = Number.isFinite(Number(pose.q_w)) ? Number(pose.q_w) : 1;
+  const siny = 2 * (qw * qz + qx * qy);
+  const cosy = 1 - 2 * (qy * qy + qz * qz);
+  return Math.atan2(siny, cosy);
+}
+
+function hasStoredInitialPose(pose) {
+  if (!pose || pose.source === "unset") return false;
+  return ["x", "y", "yaw", "q_z", "q_w"].some((key) => pose[key] !== undefined && pose[key] !== null && pose[key] !== "");
 }
 
 function readiness(kind) {
@@ -270,7 +315,7 @@ function renderStatus() {
   setText("bundleMap", bundleMap() || "-");
   setText("mapMatch", bundleMap() ? (mapMatches() ? "一致" : "不一致") : "无点位文件");
   const bp = bundlePosePayload();
-  setText("bundlePose", `x=${bp.x}, y=${bp.y}, yaw=${bp.yaw}`);
+  setText("bundlePose", bp.x === undefined ? "未保存初始位姿" : `x=${bp.x}, y=${bp.y}, yaw=${Number(bp.yaw).toFixed(2)}`);
   
   setText("checkMotion", `${motion.policy || "none"} / ${motion.authority || "external"}`);
   
@@ -423,19 +468,19 @@ async function saveMap() {
 async function loadMapOnly() {
   const path = $("mapSelect")?.value;
   if (!path) return alert("请先选择地图");
-  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...posePayload(), wait_for_localization: false }, timeoutMs: loadTimeoutMs() });
+  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: false }, timeoutMs: loadTimeoutMs() });
   await refresh(false);
 }
 
 async function loadMapWait() {
   const path = $("mapSelect")?.value;
   if (!path) return alert("请先选择地图");
-  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...posePayload(), wait_for_localization: true }, timeoutMs: localizationTimeoutMs });
+  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: true }, timeoutMs: localizationTimeoutMs });
   await refresh(false);
 }
 
 async function publishInitialPose() {
-  await api("/robot/localization/initial_pose", { method: "POST", body: { ...posePayload(), frame_id: "map" } });
+  await api("/robot/localization/initial_pose", { method: "POST", body: { ...initialPosePayload({ requireExplicit: true }), frame_id: "map" } });
   await refresh(false);
 }
 

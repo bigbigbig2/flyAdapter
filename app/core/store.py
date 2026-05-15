@@ -18,8 +18,6 @@ class JsonStore:
         self.config.upload_dir.mkdir(parents=True, exist_ok=True)
         self.runtime_file = self.config.data_dir / "runtime.json"
         self.routes_file = self.config.data_dir / "routes.json"
-        if not self.config.nav_points_file.exists():
-            self.save_nav_points([], self.config.default_map_path)
 
     def load_runtime(self) -> dict[str, Any]:
         return self._read_json(self.runtime_file, {})
@@ -27,9 +25,13 @@ class JsonStore:
     def save_runtime(self, data: dict[str, Any]) -> None:
         self._write_json(self.runtime_file, data)
 
-    def load_nav_points(self) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
-        data = self._read_json(self.config.nav_points_file, {})
-        return self._parse_nav_points(data)
+    def nav_points_path(self, map_file: str | None = None) -> Path:
+        return self._map_dir_for_points(map_file) / "navigation_points.json"
+
+    def load_nav_points(self, map_file: str | None = None) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+        map_dir = str(self._map_dir_for_points(map_file))
+        data = self._read_json(self.nav_points_path(map_dir), {})
+        return self._parse_nav_points(data, default_map_file=map_dir)
 
     def save_nav_points(
         self,
@@ -37,14 +39,27 @@ class JsonStore:
         map_file: str,
         initial_pose: dict[str, Any] | None = None,
     ) -> None:
+        if not str(map_file or "").strip():
+            raise ValueError("map_file is required when saving navigation points")
+        map_file = str(self._map_dir_for_points(map_file))
+        map_name = self.map_name_from_path(map_file)
+        normalized_points = [{**point, "map_file": map_file, "map_name": map_name} for point in points]
         payload = {
             "map_file": map_file,
-            "map_name": self.map_name_from_path(map_file),
+            "map_name": map_name,
             "initial_pose": initial_pose
-            or {"x": 0.0, "y": 0.0, "z": 0.0, "q_x": 0.0, "q_y": 0.0, "q_z": 0.0, "q_w": 1.0},
-            "navigation_points": points,
+            or {"source": "unset"},
+            "navigation_points": normalized_points,
         }
-        self._write_json(self.config.nav_points_file, payload)
+        self._write_json(self.nav_points_path(map_file), payload)
+
+    def load_map_initial_pose(self, map_file: str) -> dict[str, Any]:
+        _, _, initial_pose = self.load_nav_points(map_file)
+        return initial_pose
+
+    def save_map_initial_pose(self, map_file: str, initial_pose: dict[str, Any]) -> None:
+        points, _, _ = self.load_nav_points(map_file)
+        self.save_nav_points(points, map_file, initial_pose=initial_pose)
 
     def load_show_cruise(self, name: str) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
         safe_name = self._safe_name(name)
@@ -55,7 +70,8 @@ class JsonStore:
         ]
         for candidate in candidates:
             if candidate.exists():
-                return self._parse_nav_points(self._read_json(candidate, {}))
+                data = self._read_json(candidate, {})
+                return self._parse_nav_points(data, default_map_file=str(data.get("map_file", "")))
         raise FileNotFoundError(f"cruise file not found: {name}")
 
     def list_maps(self) -> list[dict[str, Any]]:
@@ -75,6 +91,8 @@ class JsonStore:
                         "path": str(path),
                         "map_root": str(root),
                         "root_kind": root_kind,
+                        "nav_points_file": str(self.nav_points_path(str(path))),
+                        "nav_point_count": len(self.load_nav_points(str(path))[0]),
                         "has_global_pcd": has_pcd,
                         "has_map_yaml": has_yaml,
                         "has_map_pgm": has_pgm,
@@ -141,10 +159,9 @@ class JsonStore:
     def save_routes(self, routes: dict[str, Any]) -> None:
         self._write_json(self.routes_file, routes)
 
-    @classmethod
-    def _parse_nav_points(cls, data: dict[str, Any]) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    def _parse_nav_points(self, data: dict[str, Any], default_map_file: str = "") -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
         points = data.get("navigation_points") or data.get("nav_points") or []
-        map_file = data.get("map_file", "")
+        map_file = str(data.get("map_file") or default_map_file or "")
         initial_pose = data.get("initial_pose") or {}
         normalized: list[dict[str, Any]] = []
         for point in points:
@@ -153,21 +170,28 @@ class JsonStore:
             normalized.append(
                 {
                     "name": str(point.get("name", f"point_{len(normalized) + 1}")),
-                    "x": cls._float(point.get("x", point.get("pose", {}).get("x", 0.0))),
-                    "y": cls._float(point.get("y", point.get("pose", {}).get("y", 0.0))),
-                    "z": cls._float(point.get("z", point.get("pose", {}).get("z", 0.0))),
-                    "q_x": cls._float(point.get("q_x", point.get("pose", {}).get("q_x", 0.0))),
-                    "q_y": cls._float(point.get("q_y", point.get("pose", {}).get("q_y", 0.0))),
-                    "q_z": cls._float(point.get("q_z", point.get("pose", {}).get("q_z", 0.0))),
-                    "q_w": cls._float(point.get("q_w", point.get("pose", {}).get("q_w", 1.0)), default=1.0),
-                    "map_file": point.get("map_file"),
-                    "map_name": point.get("map_name"),
+                    "x": self._float(point.get("x", point.get("pose", {}).get("x", 0.0))),
+                    "y": self._float(point.get("y", point.get("pose", {}).get("y", 0.0))),
+                    "z": self._float(point.get("z", point.get("pose", {}).get("z", 0.0))),
+                    "q_x": self._float(point.get("q_x", point.get("pose", {}).get("q_x", 0.0))),
+                    "q_y": self._float(point.get("q_y", point.get("pose", {}).get("q_y", 0.0))),
+                    "q_z": self._float(point.get("q_z", point.get("pose", {}).get("q_z", 0.0))),
+                    "q_w": self._float(point.get("q_w", point.get("pose", {}).get("q_w", 1.0)), default=1.0),
+                    "map_file": str(point.get("map_file") or ""),
+                    "map_name": str(point.get("map_name") or ""),
                     "frame_id": str(point.get("frame_id", "map")),
                     "tags": list(point.get("tags", [])) if isinstance(point.get("tags", []), list) else [],
                     "meta": dict(point.get("meta", {})) if isinstance(point.get("meta", {}), dict) else {},
                 }
             )
         return normalized, map_file, initial_pose
+
+    def _map_dir_for_points(self, map_file: str | None = None) -> Path:
+        raw = str(map_file or self.config.default_map_path).strip() or self.config.default_map_path
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = Path(self.resolve_map_reference(raw, require_exists=False))
+        return path.resolve(strict=False)
 
     def _read_json(self, path: Path, default: Any) -> Any:
         with self._lock:

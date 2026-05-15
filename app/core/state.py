@@ -24,7 +24,8 @@ class RuntimeState:
         self.action_status_stamp_s: float | None = None
         self.current_action: dict[str, Any] = {}
 
-        self.current_map: str = config.default_map_path
+        self.current_map: str = ""
+        self.target_map: str = config.default_map_path
         self.status_code: int = 0
         self.is_cruising: bool = False
         self.is_paused: bool = False
@@ -97,6 +98,7 @@ class RuntimeState:
                 "action_status": dict(self.action_status),
                 "current_action": dict(self.current_action),
                 "current_map": self.current_map,
+                "target_map": self.target_map,
                 "status_code": self.status_code,
                 "is_cruising": self.is_cruising,
                 "is_paused": self.is_paused,
@@ -120,6 +122,7 @@ class RuntimeState:
             "total_nav_points": snap["total_nav_points"],
             "is_arrived": snap["is_arrived"],
             "map_file": snap["current_map"],
+            "target_map": snap["target_map"],
             "status_code": snap["status_code"],
             "slam_mode": snap["slam_mode"],
             "odom_status_code": snap["odom_status_code"],

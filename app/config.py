@@ -52,7 +52,6 @@ class AppConfig:
     map_save_fallback_root: Path | None
     default_map_name: str
     default_map_path: str
-    nav_points_file: Path
     show_cruise_dir: Path
     upload_dir: Path
     motion_guard: str
@@ -77,6 +76,7 @@ class AppConfig:
     map_load_timeout_sec: float
     map_save_timeout_sec: float
     map_save_id_mode: str
+    allow_zero_initial_pose: bool
 
     @property
     def ns(self) -> str:
@@ -92,14 +92,9 @@ class AppConfig:
 def load_config() -> AppConfig:
     root_dir = Path(__file__).resolve().parents[1]
     data_dir = Path(os.getenv("ADAPTER_DATA_DIR", root_dir / "data")).expanduser()
-    nav_points_file = Path(
-        os.getenv("NAV_POINTS_FILE", data_dir / "navigation_points.json")
-    ).expanduser()
     motion_guard = normalize_motion_guard(os.getenv("MOTION_GUARD", "none"))
 
-    map_root = Path(
-        os.getenv("MAP_ROOT", "/home/gr301ab0113/aurora_ws/flyAdapter/data/maps")
-    ).expanduser()
+    map_root = Path(os.getenv("MAP_ROOT", data_dir / "maps")).expanduser()
     fallback_raw = os.getenv("MAP_SAVE_FALLBACK_ROOT", "").strip()
     map_save_fallback_root = Path(fallback_raw).expanduser() if fallback_raw else None
     default_map_name = os.getenv("DEFAULT_MAP_NAME", "map").strip() or "map"
@@ -118,7 +113,6 @@ def load_config() -> AppConfig:
         map_save_fallback_root=map_save_fallback_root,
         default_map_name=default_map_name,
         default_map_path=default_map_path,
-        nav_points_file=nav_points_file,
         show_cruise_dir=Path(
             os.getenv("SHOW_CRUISE_DIR", data_dir / "show_cruises")
         ).expanduser(),
@@ -145,4 +139,5 @@ def load_config() -> AppConfig:
         map_load_timeout_sec=float(os.getenv("MAP_LOAD_TIMEOUT_SEC", "10")),
         map_save_timeout_sec=float(os.getenv("MAP_SAVE_TIMEOUT_SEC", "10")),
         map_save_id_mode=normalize_map_save_id_mode(os.getenv("MAP_SAVE_ID_MODE", "path")),
+        allow_zero_initial_pose=_bool_env("ALLOW_ZERO_INITIAL_POSE", False),
     )

@@ -81,6 +81,8 @@ def relocation(request: Request, body: RelocationRequest | None = Body(default=N
         y=y,
         z=z,
         yaw=yaw,
+        initial_pose_provided=bool(init_pose or body.x is not None or body.y is not None or body.z is not None or body.yaw is not None),
+        allow_zero_initial_pose=body.allow_zero_initial_pose,
         wait_for_localization=body.wait_for_localization,
     )
 
