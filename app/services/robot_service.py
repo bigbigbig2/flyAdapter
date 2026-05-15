@@ -174,6 +174,7 @@ class RobotService:
             "load_timeout_sec": self.config.map_load_timeout_sec,
             "save_timeout_sec": self.config.map_save_timeout_sec,
             "allow_zero_initial_pose": self.config.allow_zero_initial_pose,
+            "initial_pose_policy": "empty_request_uses_stored_pose_else_mapping_origin",
         }
 
     def motion_authority(self, aurora: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -567,7 +568,7 @@ class RobotService:
             return {**self.legacy_status(), "result": result}
         if result.get("success", True):
             self._record_current_map(path, map_name=map_name)
-            if initial_pose.get("source") == "request":
+            if initial_pose.get("source") in {"request", "mapping_origin_default"}:
                 self.store.save_map_initial_pose(path, self._initial_pose_to_store(initial_pose))
             result["visualization"] = self.refresh_nav_visualization(clear_goal=True)
         if wait_for_localization:
@@ -630,9 +631,13 @@ class RobotService:
                 "yaw": yaw_value,
             }
         return {
-            "ok": False,
-            "source": "missing",
-            "message": "load_map requires an explicit initial pose; do not rely on default x=0,y=0,yaw=0",
+            "ok": True,
+            "source": "mapping_origin_default",
+            "message": "no stored/request initial pose; using mapping origin x=0,y=0,yaw=0",
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "yaw": 0.0,
             "map_file": map_file,
             "nav_points_file": str(self.store.nav_points_path(map_file)),
         }
@@ -649,7 +654,7 @@ class RobotService:
             q_w=quat["q_w"],
             frame_id="map",
         )
-        pose["source"] = "relocation_request"
+        pose["source"] = str(initial_pose.get("source") or "relocation_request")
         pose["saved_at_ms"] = now_ms()
         return pose
 

@@ -35,6 +35,7 @@ let slamStatus = {};
 let navPoints = [];
 let availableMaps = [];
 let availableRoutes = [];
+let lastLoadInitialPose = {};
 let pointBundle = {
   map_file: "",
   map_name: "",
@@ -316,6 +317,14 @@ function renderStatus() {
   setText("mapMatch", bundleMap() ? (mapMatches() ? "一致" : "不一致") : "无点位文件");
   const bp = bundlePosePayload();
   setText("bundlePose", bp.x === undefined ? "未保存初始位姿" : `x=${bp.x}, y=${bp.y}, yaw=${Number(bp.yaw).toFixed(2)}`);
+  const loadPose = lastLoadInitialPose.source ? lastLoadInitialPose : bp;
+  setText(
+    "loadPoseDebug",
+    loadPose?.source
+      ? `${loadPose.source}: x=${numberOrZero(loadPose.x)}, y=${numberOrZero(loadPose.y)}, yaw=${numberOrZero(loadPose.yaw).toFixed(2)}`
+      : "空输入将使用建图原点"
+  );
+  setText("navPointsFile", pointBundle.nav_points_file || mapConfig.current_nav_points_file || mapConfig.target_nav_points_file || "-");
   
   setText("checkMotion", `${motion.policy || "none"} / ${motion.authority || "external"}`);
   
@@ -468,14 +477,16 @@ async function saveMap() {
 async function loadMapOnly() {
   const path = $("mapSelect")?.value;
   if (!path) return alert("请先选择地图");
-  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: false }, timeoutMs: loadTimeoutMs() });
+  const data = await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: false }, timeoutMs: loadTimeoutMs() });
+  lastLoadInitialPose = data?.result?.initial_pose || {};
   await refresh(false);
 }
 
 async function loadMapWait() {
   const path = $("mapSelect")?.value;
   if (!path) return alert("请先选择地图");
-  await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: true }, timeoutMs: localizationTimeoutMs });
+  const data = await api("/slam/relocation", { method: "POST", body: { map_path: path, ...initialPosePayload(), wait_for_localization: true }, timeoutMs: localizationTimeoutMs });
+  lastLoadInitialPose = data?.result?.initial_pose || {};
   await refresh(false);
 }
 

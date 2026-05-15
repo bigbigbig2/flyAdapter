@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GR3 核心控制台</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260515-2" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260515-3" />
 </head>
 <body>
   <header class="app-header">
@@ -156,8 +156,8 @@
             </div>
             <div class="action-grid">
               <div class="form-grid">
-                <label class="field"><span>X</span><input id="initX" type="number" placeholder="不填则使用已保存位姿" step="0.1" /></label>
-                <label class="field"><span>Y</span><input id="initY" type="number" placeholder="不填则使用已保存位姿" step="0.1" /></label>
+                <label class="field"><span>X</span><input id="initX" type="number" placeholder="空=建图原点/已保存" step="0.1" /></label>
+                <label class="field"><span>Y</span><input id="initY" type="number" placeholder="空=建图原点/已保存" step="0.1" /></label>
                 <label class="field"><span>Yaw</span><input id="initYaw" type="number" placeholder="弧度" step="0.1" /></label>
               </div>
               <label class="field inline">
@@ -189,6 +189,8 @@
             <div><span>绑定地图</span><strong id="bundleMap">-</strong></div>
             <div><span>地图匹配</span><strong id="mapMatch">-</strong></div>
             <div><span>当前位姿</span><strong id="bundlePose">-</strong></div>
+            <div><span>加载位姿</span><strong id="loadPoseDebug">-</strong></div>
+            <div><span>点位文件</span><strong id="navPointsFile">-</strong></div>
           </div>
         </aside>
       </section>
@@ -299,6 +301,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=20260515-2"></script>
+  <script src="/static/app.js?v=20260515-3"></script>
 </body>
 </html>
